@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Private Security Vulnerability Report
+    url: https://github.com/NoVate911/NexDeck/security/advisories/new
+    about: Report security vulnerabilities privately without exposing exploit details publicly.
+  - name: Technical Specification (TZ.md)
+    url: https://github.com/NoVate911/NexDeck/blob/main/TZ.md
+    about: Review the full NexDeck specification and roadmap before opening new proposals.
