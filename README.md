@@ -1,113 +1,110 @@
-# NexDeck
+<div align="center">
+  <img src="assets/logo.svg" alt="NexDeck Logo" width="120" height="120" />
+  <h1>NexDeck</h1>
+  <p><strong>Лёгкая открытая модульная платформа для мониторинга Windows 11, настраиваемых панелей управления в стиле Stream Deck, уведомлений и удалённого подтверждения действий с телефона.</strong></p>
 
-[![CI](https://github.com/NoVate911/NexDeck/actions/workflows/ci.yml/badge.svg)](https://github.com/NoVate911/NexDeck/actions/workflows/ci.yml)
-[![Security](https://github.com/NoVate911/NexDeck/actions/workflows/security.yml/badge.svg)](https://github.com/NoVate911/NexDeck/actions/workflows/security.yml)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+  <p>
+    <a href="https://github.com/NoVate911/NexDeck/actions/workflows/ci.yml"><img src="https://github.com/NoVate911/NexDeck/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+    <a href="https://github.com/NoVate911/NexDeck/actions/workflows/security.yml"><img src="https://github.com/NoVate911/NexDeck/actions/workflows/security.yml/badge.svg" alt="Security" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
+  </p>
 
-> Open-source, modular platform for ultra-lightweight Windows 11 system monitoring, customizable Stream Deck-style panels, unified notifications, remote control, and mobile remote action approval.
-
-[Русская версия](docs/README.ru.md) · [Technical Specification (TZ.md)](TZ.md) · [Architecture](docs/architecture/overview.md) · [Roadmap](docs/architecture/roadmap.md)
+  <p>
+    <a href="docs/README.en.md">English</a> ·
+    <a href="docs/architecture/overview.md">Архитектура</a> ·
+    <a href="docs/architecture/roadmap.md">Дорожная карта</a> ·
+    <a href="docs/api/universal-api.md">Universal API</a> ·
+    <a href="JOURNAL.md">Журнал проекта</a>
+  </p>
+</div>
 
 ---
 
-## Project Status
+## О проекте
 
-NexDeck is currently completing **Stage 0 (Repository & Architecture Foundation)** aligned with [TZ.md v0.3.0](TZ.md).  
-The Rust workspace (`0.1.0`) defines modular crate boundaries, domain contracts, security boundaries, and full CI/CD automation ahead of Stage 1 Core Agent implementation.
+**NexDeck** превращает смартфон (Android / iOS) в персональную панель мониторинга и управления компьютером под Windows 11 без облачных серверов и тяжёлых фоновых процессов.
 
-## Core Principles
+- **Минимальное потребление ресурсов:** фоновый агент на **Rust** без встроенного GUI, ориентир — **2–5 МБ RAM в простое**.
+- **Независимость от транспорта:** в MVP используется Wi-Fi / WebSocket, архитектура абстрагирована для последующей поддержки USB и Bluetooth.
+- **Модульность и безопасность:** чёткое разделение ядра, отдельного Desktop-конфигуратора, мобильного клиента, изолированных WASM-плагинов и системы подтверждения действий.
 
-- **Minimal Footprint:** Background Core Agent in **Rust** targeting **2–5 MB idle RAM**, minimal CPU overhead, and zero heavy GUI dependencies in the background service.
-- **Modular Architecture:** Strict separation between the headless Core Agent, pure-Rust Desktop Manager, cross-platform Flutter Mobile Client, Transport Layer, and sandboxed WASM Plugin Engine.
-- **Transport Agnostic:** Wi-Fi over WebSocket for MVP, designed from day one to support USB and Bluetooth without coupling business logic to transport details.
-- **Security by Design:** Explicit device pairing, least-privilege API tokens, single-use nonces with expiration for remote approvals, sandboxed plugins with resource quotas, and clear separation from Windows UAC.
+> **Статус:** завершён **Этап 0** (инфраструктура репозитория, контракты крейтов, документация, CI/CD и защита `main`). Впереди — **Этап 1 (Core Agent)**. Актуальный статус ведётся в [`JOURNAL.md`](JOURNAL.md).
 
-## Planned Capabilities
+---
 
-- **Hardware Monitoring:** CPU (per-core load, clock, temperature), RAM, GPU (load, temp, clocks, VRAM), Disks (capacity, read/write throughput), Network, fans, sensors, processes, uptime, and battery status.
-- **Custom Control Deck Panels:** Multi-panel builder with movable/resizable widgets (text, metrics, buttons, toggles, charts, indicators, icons, custom views), themes, refresh rates, and import/export.
-- **Universal API:** Local IPC, HTTP, and WebSocket interfaces plus language SDKs so external apps can publish events, read authorized telemetry, and trigger remote approval prompts.
-- **Remote Approval System:** Forward scoped approval prompts from third-party applications to your phone with risk levels, single-use IDs, timeouts, and audit history (without replacing Windows UAC).
-- **Notification Center:** Centralized feed for Windows events, application alerts, hardware warnings (thermal/disk), priorities, filtering, and sleep-wake buffering.
-- **Remote Control:** App launcher, volume and media controls, hotkeys, process actions, authorized commands, and authenticated power controls.
-- **Sandboxed Plugin Engine:** Isolated **WebAssembly** extension runtime with granular permissions, CPU/memory limits, and hang termination.
+## Ключевые возможности (по этапам)
 
-## Technology Stack
-
-| Component | Technology | Status |
+| Подсистема | Назначение | Этап |
 | --- | --- | --- |
-| **Core Agent & Crates** | Rust (Edition 2024) | Stage 0 contracts & CI active |
-| **Desktop Manager** | Pure Rust UI (`egui` / `slint`, see [ADR-0002](docs/architecture/adr/0002-desktop-ui-pure-rust.md)) | Stage 0 skeleton |
-| **Mobile Client (Android / iOS)** | Flutter (see [ADR-0003](docs/architecture/adr/0003-mobile-client-flutter.md)) | Planned (Stage 2) |
-| **Plugin Runtime** | WebAssembly / Wasmtime (see [ADR-0004](docs/architecture/adr/0004-plugin-engine-wasm.md)) | Stage 0 contract |
-| **Primary Transport (MVP)** | Wi-Fi / WebSocket (USB & Bluetooth later) | Stage 0 contract |
+| **Системный мониторинг** | CPU (по ядрам, частоты, температуры), RAM, GPU, диски, сеть, датчики, процессы, батарея | Этап 1–2 |
+| **Конструктор панелей** | Несколько экранов, сетка виджетов, графики, кнопки, переключатели, импорт/экспорт | Этап 3 |
+| **Удалённое управление** | Запуск программ, громкость, мультимедиа, горячие клавиши, разрешённые команды, питание | Этап 2–5 |
+| **Universal API** | Локальный IPC, WebSocket и HTTP API + SDK для сторонних приложений | Этап 4 |
+| **Remote Approval** | Запросы на подтверждение действий с телефона (таймаут, уровни риска, без подмены UAC) | Этап 5 |
+| **Notification Center** | События Windows, приложений и предупреждения с буферизацией на время сна | Этап 5 |
+| **Plugin Engine** | Изолированные плагины на WebAssembly с разрешениями и квотами CPU/RAM | Этап 6 |
 
-## Repository Layout
+---
+
+## Технологический стек
+
+| Компонент | Решение | Документ |
+| --- | --- | --- |
+| **Core Agent** (`nexdeck-agent`) | Rust (Edition 2024) | [ADR-0001](docs/architecture/adr/0001-core-rust-and-workspace.md) |
+| **Desktop Manager** (`nexdeck-desktop`) | Чистый Rust UI (`egui` / `slint`), отдельный процесс | [ADR-0002](docs/architecture/adr/0002-desktop-ui-pure-rust.md) |
+| **Mobile Client** (Android / iOS) | Flutter | [ADR-0003](docs/architecture/adr/0003-mobile-client-flutter.md) |
+| **Plugin Engine** | WebAssembly (`wasmtime`) | [ADR-0004](docs/architecture/adr/0004-plugin-engine-wasm.md) |
+
+---
+
+## Структура репозитория
 
 ```text
 NexDeck/
-├── .github/                 # CI/CD workflows, Dependabot, CODEOWNERS, Issue/PR templates
+├── .github/          # Workflows CI/Security/Release, Dependabot, шаблоны Issue и PR
 ├── apps/
-│   ├── desktop/             # Pure-Rust Desktop Manager GUI crate
-│   └── mobile/              # Flutter Android/iOS client workspace plan
-├── crates/
-│   ├── core/                # Core Agent binary (nexdeck-agent) & orchestration
-│   ├── transport/           # Transport abstraction (Wi-Fi WebSocket, USB, Bluetooth)
-│   ├── monitoring/          # Hardware telemetry traits & snapshot models
-│   ├── plugin_engine/       # Sandboxed WASM plugin contracts & quotas
-│   ├── api/                 # Universal API schemas & auth policies
-│   ├── notifications/       # Notification center, filtering, sleep queue
-│   └── approval/            # Remote Approval state machine & replay protection
-├── docs/
-│   ├── architecture/        # Requirements, architecture overview, roadmap, test plan, ADRs
-│   ├── api/                 # Universal API & Plugin specifications
-│   ├── development/         # Developer & release guides
-│   └── security/            # Threat model & security boundaries
-├── examples/                # Sample payloads and integration examples
-├── scripts/                 # Local verification scripts (verify.ps1 / verify.sh)
-├── sdk/                     # Future external language SDKs (Stage 4)
-├── tests/                   # Workspace integration test suites
-├── Cargo.toml               # Workspace configuration
-├── deny.toml                # cargo-deny advisory, license, and ban policies
-└── TZ.md                    # Full Technical Specification (Russian, v0.3.0)
+│   ├── desktop/      # Конфигуратор Windows 11 на чистом Rust UI
+│   └── mobile/       # Мобильный клиент Flutter (Android / iOS)
+├── assets/           # Логотип и графические ресурсы проекта
+├── crates/           # Модульное ядро: core, transport, monitoring, api, approval, notifications, plugin_engine
+├── docs/             # Архитектура, требования, ADR, API, безопасность, архив журнала
+├── examples/         # Примеры конфигураций и запросов API
+├── scripts/          # Скрипты локальной проверки (verify.ps1 / verify.sh)
+├── sdk/              # Клиентские SDK (Этап 4)
+├── tests/            # Интеграционные тесты workspace
+├── AGENTS.md         # Инструкции для AI-агентов
+└── JOURNAL.md        # Актуальный журнал проекта
 ```
 
-## Quick Start (Stage 0 Verification)
+---
 
-Prerequisites: [Rust toolchain](https://rustup.rs/) (stable).
+## Быстрый старт (проверка сборки Stage 0)
+
+Требуется установленный [Rust toolchain](https://rustup.rs/) (`stable`). На Windows для сборки и запуска тестов также необходимы компоненты C++ Build Tools (`link.exe`).
 
 ```powershell
-# Clone the repository
 git clone https://github.com/NoVate911/NexDeck.git
 cd NexDeck
 
-# Run formatting, clippy, unit/integration tests, doc checks, and release build
+# Проверка форматирования, компиляции, clippy, тестов и документации
 ./scripts/verify.ps1
 ```
 
-On Linux / macOS / Git Bash:
+Для Linux / macOS:
 
 ```bash
 ./scripts/verify.sh
 ```
 
-## Documentation
+---
 
-- [Technical Specification (RU)](TZ.md)
-- [Requirements & Constraints](docs/architecture/requirements.md)
-- [Architecture Overview](docs/architecture/overview.md)
-- [Development Roadmap & Open Questions](docs/architecture/roadmap.md)
-- [Testing Plan](docs/architecture/testing-plan.md)
-- [Universal API Draft](docs/api/universal-api.md)
-- [Plugin System Draft](docs/api/plugins.md)
-- [Threat Model](docs/security/threat-model.md)
-- [Getting Started Guide](docs/development/getting-started.md)
+## Документация и участие в проекте
 
-## Contributing & Security
+- **Для разработчиков и AI-агентов:** [`AGENTS.md`](AGENTS.md), [`JOURNAL.md`](JOURNAL.md), [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- **Архитектура:** [Обзор системы](docs/architecture/overview.md), [Требования и ограничения](docs/architecture/requirements.md), [Дорожная карта](docs/architecture/roadmap.md), [План тестирования](docs/architecture/testing-plan.md)
+- **Безопасность:** [Политика безопасности](SECURITY.md), [Модель угроз](docs/security/threat-model.md)
+- **Сообщество:** [Кодекс поведения](CODE_OF_CONDUCT.md)
 
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md) before opening an Issue or Pull Request.  
-To report a security issue privately, follow [SECURITY.md](SECURITY.md).
+## Лицензия
 
-## License
-
-NexDeck is licensed under the **Apache License 2.0** — see [LICENSE](LICENSE) for full details.
+Проект распространяется под лицензией **Apache License 2.0** — подробности в файле [LICENSE](LICENSE).

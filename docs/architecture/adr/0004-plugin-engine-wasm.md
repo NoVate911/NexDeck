@@ -1,18 +1,17 @@
-# ADR-0004: WebAssembly as Primary Plugin Engine Runtime
+# ADR-0004: WebAssembly как основной рантайм плагинов
 
-- **Status:** Accepted
-- **Date:** 2026-11-17
-- **Deciders:** `@NoVate911`
+- **Статус:** Принято
+- **Дата:** 2026-11-17
 
-## Context
+## Контекст
 
-`TZ.md` (§3.5, §6) requires an isolated extension system supporting scoped permissions, memory/CPU resource limits, and termination of hung modules while keeping the background Core Agent lightweight.
+Система расширений должна обеспечивать изоляцию исполнения, разрешения и принудительную остановку зависших модулей без раздувания памяти `Core Agent`.
 
-## Decision
+## Решение
 
-Adopt **WebAssembly (WASM)** (targeting `wasmtime` with fuel/epoch interruption and memory limits in Stage 6) as the primary embedded plugin runtime inside `crates/plugin_engine`. Optional external-process bridges for Python or JS scripts may be layered later over the local Universal API without linking their runtimes into `nexdeck-agent`.
+Выбрать **WebAssembly (WASM)** (на базе `wasmtime` на Этапе 6) в качестве основного песочного рантайма. Поддержка скриптов на JS/Python при необходимости может подключаться позднее как внешние изолированные процессы через Universal API.
 
-## Consequences
+## Последствия
 
-- **Positive:** Strong memory sandboxing, deterministic CPU/time quotas, multi-language authoring (Rust, C, AssemblyScript, etc. compiled to `.wasm`), and zero runtime overhead when plugins are disabled.
-- **Negative:** Requires defining a stable host-guest ABI/WIT contract and shipping documentation/tooling for plugin authors in Stage 6.
+- **Плюсы:** строгая изоляция памяти, контроль времени выполнения и ресурсов, возможность писать плагины на разных языках, компилируемых в `.wasm`, и нулевой расход RAM при отключённых плагинах.
+- **Минусы:** потребуется проектирование и документирование стабильного ABI для авторов плагинов на Этапе 6.

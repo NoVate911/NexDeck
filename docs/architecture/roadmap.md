@@ -1,75 +1,64 @@
-# Development Roadmap & Open Questions
+# Дорожная карта и открытые вопросы
 
-Development is structured into 8 incremental stages aligned with [TZ.md](../../TZ.md) (§27–§35). Each stage is delivered through scoped GitHub Issues and reviewed Pull Requests.
-
----
-
-## Stage Breakdown
-
-### Stage 0 — Repository & Architecture Foundation (Current)
-- Public GitHub repository setup, Apache-2.0 license approval, and governance docs
-- Cargo workspace (`crates/*`, `apps/desktop`, `tests/integration`) with contract traits, unit/integration tests, and doc verification
-- Requirements matrix, architecture overview, ADRs, threat model, and testing plan
-- GitHub Actions CI (`fmt`, `check`, `clippy`, `unit`, `integration`, `doc`, `release build`), security workflows (`CodeQL`, `cargo-deny`, `Dependency Review`, `Secret Scan`), and `main` branch protection ruleset
-
-### Stage 1 — Core Agent (`crates/core`, `crates/transport`, `crates/monitoring`)
-- Windows 11 background agent lifecycle and autostart integration
-- Baseline Windows hardware monitoring (CPU, RAM, Disk, Network)
-- Wi-Fi WebSocket server with TLS/pairing handshake and reconnect recovery
-- Idle RAM & CPU measurement harness on real Windows release builds
-
-### Stage 2 — Mobile Client (`apps/mobile`)
-- Initialize Flutter project for Android and iOS
-- Device pairing and WebSocket client reconnection
-- Live telemetry views for CPU, RAM, GPU, Disk, and Network
-- Basic remote media/volume control actions
-
-### Stage 3 — Widget Engine & Desktop Manager (`apps/desktop`, `apps/mobile`)
-- Panel builder: create, edit, move, resize widgets, customize appearance & refresh rate
-- Built-in widget catalog (text, numeric, buttons, toggles, charts, gauges, images, icons)
-- JSON panel configuration persistence, import, and export
-- Desktop Manager UI (`egui` / `slint`) for device pairing, security, and panel management
-
-### Stage 4 — Universal API (`crates/api`, `sdk/`, `examples/`)
-- Local IPC (Named Pipes) + local HTTP + WebSocket server endpoints
-- Application registration, token issuance, scoped permissions, revocation
-- Official SDK starter(s) and integration examples
-
-### Stage 5 — Notification Center & Remote Approval (`crates/notifications`, `crates/approval`)
-- Windows notification capture, system/hardware alerts, filtering, and sleep buffering
-- End-to-end Remote Approval flow from third-party app -> mobile prompt -> signed decision callback
-- Request history, risk levels, and replay-protection tests
-
-### Stage 6 — Plugin Engine (`crates/plugin_engine`)
-- WebAssembly runtime integration (`wasmtime` / Component Model or host ABI)
-- Plugin manifest verification, capability enforcement, memory/execution timeouts, and hang termination
-- Plugin SDK documentation and example widgets
-
-### Stage 7 — Additional Transports (`crates/transport`)
-- USB transport (e.g., ADB reverse / USB accessory channel)
-- Bluetooth transport
-- Zero-config device discovery (mDNS / QR pairing) and connection resilience
+Разработка разбита на 8 последовательных этапов. Каждая задача выполняется через отдельный Issue и Pull Request с обязательным обновлением [`JOURNAL.md`](../../JOURNAL.md).
 
 ---
 
-## MVP Acceptance Criteria (`TZ.md` §35)
+## Этапы разработки
 
-The first MVP milestone requires all of the following end-to-end capabilities:
+### Этап 0 — Подготовка (завершён)
+- Публичный GitHub-репозиторий, лицензия Apache-2.0, документация и инструкции для AI-агентов.
+- Модульный Cargo Workspace (`0.1.0`), контракты подсистем и интеграционные тесты.
+- GitHub Actions CI, CodeQL, `cargo-deny`, Secret Scan, Dependency Review, Release workflow и Ruleset защиты `main`.
 
-1. Installs cleanly on Windows 11 and auto-starts the Core Agent independently of the Desktop GUI.
-2. Pairs and connects a mobile device over Wi-Fi with secure authentication and automatic reconnection.
-3. Streams core hardware telemetry and supports customizable, persistent user panels.
-4. Exposes the Universal API to receive third-party `approval_request` payloads, display them on the phone, and return user decisions to the calling application.
-5. Passes unit, integration, security, and GitHub Actions CI checks with up-to-date documentation.
+### Этап 1 — Core Agent (`crates/core`, `crates/transport`, `crates/monitoring`)
+- Фоновый режим Windows 11 и автозапуск.
+- Базовый сбор метрик (CPU, RAM, диски, сеть).
+- Wi-Fi WebSocket-сервер, сопряжение устройств и профилирование памяти (цель **2–5 МБ RAM** в простое).
+
+### Этап 2 — Mobile Client (`apps/mobile`)
+- Инициализация проекта Flutter (Android / iOS).
+- Подключение и переподключение к ПК по Wi-Fi.
+- Отображение базовых показателей (CPU, RAM, GPU, диски, сеть) и базовое управление мультимедиа/громкостью.
+
+### Этап 3 — Widget Engine и Desktop Manager (`apps/desktop`, `apps/mobile`)
+- Конструктор панелей: добавление, перемещение, изменение размеров, стилизация, частота обновления.
+- Базовые виджеты, сохранение, импорт и экспорт конфигураций.
+- Графическая оболочка `nexdeck-desktop` на чистом Rust UI.
+
+### Этап 4 — Universal API (`crates/api`, `sdk/`, `examples/`)
+- Локальный IPC (Named Pipes / сокеты), HTTP и WebSocket API.
+- Регистрация приложений, выдача и отзыв токенов с ограниченными правами.
+- Клиентские SDK и примеры интеграции.
+
+### Этап 5 — Notifications & Remote Approval (`crates/notifications`, `crates/approval`)
+- Центр уведомлений Windows и аппаратных событий с буфером сна.
+- Сквозной сценарий Remote Approval: запрос от внешнего приложения -> экран телефона -> возврат решения.
+
+### Этап 6 — Plugin Engine (`crates/plugin_engine`)
+- Интеграция изолированного WASM-рантайма (`wasmtime`).
+- Контроль разрешений, ограничение памяти/CPU/времени и принудительная остановка зависших модулей.
+
+### Этап 7 — Дополнительные транспорты (`crates/transport`)
+- Транспорты USB и Bluetooth.
+- Улучшенное обнаружение устройств (mDNS / QR) и повышение устойчивости соединений.
 
 ---
 
-## Open Questions for Upcoming Stages
+## Критерии приёмки MVP
 
-These implementation details do not block Stage 0 and should be finalized in dedicated Issues/ADRs at the start of their respective stages:
+1. Установка на Windows 11 и автозапуск фонового агента независимо от GUI.
+2. Безопасное сопряжение и подключение мобильного устройства по Wi-Fi с переподключением.
+3. Передача базовых системных показателей и настраиваемые сохраняемые панели.
+4. Работающий Universal API: приём `approval_request` от стороннего приложения, показ на телефоне и возврат решения.
+5. Успешное прохождение тестов, GitHub Actions и актуальная документация.
 
-1. **Desktop UI crate selection (Stage 1/3):** Choose between `egui` (`eframe`) and `slint` for `apps/desktop` based on native Windows look, binary size, accessibility, and Apache-2.0 license compatibility.
-2. **Local IPC mechanism on Windows 11 (Stage 4):** Choose Windows Named Pipes vs. authenticated loopback TCP/Unix domain sockets for `Desktop Manager` <-> `Core Agent` and local `Universal API`.
-3. **GPU & Thermal Sensor Backend (Stage 1/2):** Decide between direct NVML/D3DKMT/PDH bindings vs. an optional elevated helper service for motherboard/CPU temperature sensors.
-4. **Device Discovery & Pairing UX (Stage 1/2):** Finalize QR code payload + mDNS (`_nexdeck._tcp.local`) vs. manual host/PIN pairing.
-5. **WASM Plugin ABI (Stage 6):** Choose between WebAssembly Component Model (WIT) vs. minimal flat C-ABI host functions.
+---
+
+## Открытые вопросы (согласуются перед профильными этапами)
+
+1. **Выбор UI-крейта для `apps/desktop` (Этап 1/3):** `egui` (`eframe`) или `slint` по критериям размера бинарника, нативности Windows 11 и совместимости с Apache-2.0.
+2. **Механизм локального IPC (Этап 4):** Windows Named Pipes или авторизованный loopback TCP/Unix-сокет.
+3. **Сенсоры GPU и температур (Этап 1/2):** прямые привязки PDH/NVML/D3DKMT или опциональный сервис-коллектор.
+4. **Обнаружение устройств (Этап 1/2):** QR-код + mDNS (`_nexdeck._tcp.local`) или ручной ввод адреса и PIN.
+5. **ABI плагинов (Этап 6):** WebAssembly Component Model (WIT) или минимальный набор host-функций.

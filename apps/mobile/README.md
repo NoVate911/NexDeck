@@ -1,14 +1,12 @@
-# NexDeck Mobile Client (Flutter)
+# Мобильный клиент NexDeck (Flutter)
 
-Cross-platform Android and iOS application planned for **Stage 2** (`TZ.md` §3.3, §29, [ADR-0003](../../docs/architecture/adr/0003-mobile-client-flutter.md)).
+Единое приложение для **Android** и **iOS**, запланированное на **Этап 2** ([ADR-0003](../../docs/architecture/adr/0003-mobile-client-flutter.md)).
 
-## Planned Modules
+## Планируемые модули
 
-- **Connection & Pairing:** Wi-Fi WebSocket client with TLS pinning, pairing flow, and automatic reconnection (USB & Bluetooth adapters in Stage 7).
-- **Live Telemetry:** CPU, RAM, GPU, Disk, Network, and sensor views.
-- **Control Deck & Widget Engine:** Multi-page customizable panels with movable/resizable widgets and JSON import/export (Stage 3).
-- **Notification Center & Remote Approval:** Actionable notifications and timed `approve` / `deny` approval prompts (Stage 5).
+- **Подключение и сопряжение:** клиент Wi-Fi WebSocket с авто-переподключением (USB и Bluetooth на Этапе 7).
+- **Мониторинг:** отображение метрик CPU, RAM, GPU, дисков, сети и датчиков.
+- **Конструктор панелей и виджеты:** настраиваемые экраны, стили и импорт/экспорт конфигураций (Этап 3).
+- **Уведомления и Remote Approval:** центр уведомлений и экраны подтверждения действий (Этап 5).
 
-## Note on Tooling
-
-The Flutter SDK will be initialized here in Stage 2 (`flutter create --org dev.nexdeck --platforms=android,ios .`) along with dedicated Android (`ubuntu-latest`) and iOS (`macos-latest`) CI checks.
+> Инициализация Flutter-проекта будет выполнена на старте Этапа 2 вместе с добавлением CI-проверок для Android и iOS.

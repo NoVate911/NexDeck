@@ -1,16 +1,12 @@
-## Summary
+## Описание изменений
 
-<!-- Short, clear title/summary matching Conventional Commits style -->
+<!-- Кратко опишите, что сделано в этом Pull Request -->
 
-## Description
+## Причина изменений
 
-<!-- What does this Pull Request change? -->
+<!-- Зачем нужны изменения, какую задачу или проблему они решают -->
 
-## Reason for Changes
-
-<!-- Why is this change needed? What problem or stage task does it solve? -->
-
-## Affected Components
+## Затронутые компоненты
 
 - [ ] `crates/core`
 - [ ] `crates/transport`
@@ -22,22 +18,23 @@
 - [ ] `apps/desktop`
 - [ ] `apps/mobile`
 - [ ] `sdk` / `examples`
-- [ ] `docs` / `CI` / repository config
+- [ ] `docs` / `CI` / конфигурация репозитория
 
-## Testing Results
+## Результаты тестирования
 
-<!-- Describe local checks and tests executed (e.g., ./scripts/verify.ps1) -->
+<!-- Укажите выполненные локально и в CI проверки (например, ./scripts/verify.ps1) -->
 
 - [ ] `cargo fmt --all -- --check`
-- [ ] `cargo check --workspace --all-targets`
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings`
-- [ ] `cargo test --workspace`
-- [ ] `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
+- [ ] `cargo check --workspace --all-targets --locked`
+- [ ] `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- [ ] `cargo test --workspace --locked`
+- [ ] `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked`
+- [ ] Журнал проекта [`JOURNAL.md`](../JOURNAL.md) обновлён
 
-## Potential Risks
+## Возможные риски
 
-<!-- Identify breaking changes, security impacts, performance risks, or migration notes -->
+<!-- Несовместимые изменения, риски производительности/безопасности или пометки по проверке -->
 
-## Related Issue
+## Связанный Issue
 
 Closes #

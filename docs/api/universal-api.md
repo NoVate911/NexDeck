@@ -1,60 +1,57 @@
-# Universal API Reference (Draft — Stage 0 Contract)
+# Universal API (Черновик контрактов Этапа 0)
 
-The **Universal API** (`crates/api`) enables local and authorized third-party applications to integrate with NexDeck for notifications, telemetry reads, custom events, plugin interaction, and remote action approvals.
+**Universal API** (`crates/api`) позволяет локальным и сторонним приложениям отправлять уведомления, читать разрешённую телеметрию, создавать события и запрашивать подтверждение действий на мобильном устройстве.
 
-> **Status:** Stage 0 defines the strongly-typed Rust contract and security validation rules. Transport bindings (Local IPC, HTTP, WebSocket) will be implemented in Stage 4 (`TZ.md` §7, §31).
-
----
-
-## 1. Transports & Priority
-
-- **Local IPC API (Stage 4 MVP):** Windows Named Pipes / local socket for low-overhead local integrations.
-- **WebSocket API (Stage 4 MVP):** Bidirectional event and approval callback stream.
-- **HTTP API (Stage 4+):** Request/response REST endpoints for simple webhooks and scripts.
+> **Статус:** на Этапе 0 зафиксированы контракты Rust и правила валидации. Сетевые и IPC-транспорты (Local IPC, WebSocket, HTTP) будут реализованы на **Этапе 4**.
 
 ---
 
-## 2. Approval Request Example (`TZ.md` §7.1)
+## 1. Каналы взаимодействия
+
+- **Локальный IPC API (Этап 4, MVP):** Windows Named Pipes / локальный сокет.
+- **WebSocket API (Этап 4, MVP):** двунаправленный поток событий и результатов подтверждения на `localhost` (стандартный локальный порт будет зафиксирован на Этапе 4).
+- **HTTP API (Этап 4+):** локальные REST-эндпоинты.
+
+---
+
+## 2. Пример запроса подтверждения (`examples/approval_request.json`)
 
 ```json
 {
   "type": "approval_request",
-  "application": "MyApplication",
-  "title": "Confirm Action",
-  "description": "Allow execution of the requested operation?",
+  "application": "ExampleApp",
+  "title": "Подтверждение действия",
+  "description": "Разрешить выполнение тестовой операции?",
   "timeout": 60,
   "actions": ["approve", "deny"]
 }
 ```
 
-See also [examples/approval_request.json](../../examples/approval_request.json).
-
-### Approval Lifecycle
+### Жизненный цикл подтверждения
 
 ```mermaid
 sequenceDiagram
-    participant App as External Application
+    participant App as ExampleApp
     participant API as Universal API
-    participant Approval as Approval Registry
+    participant Approval as ApprovalRegistry
     participant Core as Core Agent & Transport
     participant Phone as Mobile Client
 
-    App->>API: Authenticated approval_request (timeout, actions)
-    API->>Approval: Register request with single-use request_id & expiry
-    Approval->>Core: Dispatch prompt
-    Core->>Phone: Push prompt over active transport
-    Phone-->>Core: User selects approve / deny
-    Core-->>Approval: Submit decision + request_id
-    Approval-->>API: Verified one-time result
-    API-->>App: Return decision
+    App->>API: Авторизованный approval_request (timeout, actions)
+    API->>Approval: Регистрация с одноразовым request_id и сроком действия
+    Approval->>Core: Отправка запроса
+    Core->>Phone: Показ уведомления на экране телефона
+    Phone-->>Core: Выбор пользователя (approve / deny)
+    Core-->>Approval: Передача решения и request_id
+    Approval-->>API: Подтверждённый одноразовый результат
+    API-->>App: Возврат результата
 ```
 
 ---
 
-## 3. Security Rules (`TZ.md` §7.2)
+## 3. Правила безопасности
 
-- Every client must register a unique `ClientIdentity` and authenticate using a revocable token.
-- Permissions are deny-by-default (`ReadMetrics`, `SendNotification`, `RequestApproval`, `ReadPlugins`, `ExecuteAllowedAction`).
-- Every approval request is bound to a single-use `request_id`, originating `application`, allowed action list, and bounded `timeout_secs` (`1..=3600`).
-- Replayed `request_id` values or expired requests are unconditionally rejected.
-- Third-party applications never receive unrestricted OS or UAC privileges.
+- Каждое приложение регистрируется под уникальным `client_id` и использует отзываемый токен.
+- Разрешения выдаются по принципу `deny-by-default` (`ReadMetrics`, `SendNotification`, `RequestApproval`, `InteractPlugins`, `ExecuteAllowedAction`).
+- Каждый запрос привязан к одноразовому `request_id`, приложению-источнику, разрешённому списку действий и ограниченному времени ожидания (`1..=3600` секунд).
+- Повторное использование `request_id` и просроченные решения отклоняются.

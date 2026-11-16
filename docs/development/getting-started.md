@@ -1,43 +1,31 @@
-# Getting Started (Developer Guide)
+# Руководство разработчика
 
-## Prerequisites
+## Требования к окружению
 
-- **Rust toolchain (`stable`):** Install via [rustup.rs](https://rustup.rs/) with `rustfmt` and `clippy` components.
-- **Windows MSVC Linker (`link.exe`):** Install Visual Studio or Build Tools for Visual Studio with the **Desktop development with C++** workload and Windows 11 SDK.
-- **Git & GitHub CLI (`gh`):** Recommended for branch, issue, and PR workflows.
-- **Target OS:** Windows 11 (primary runtime), with Linux/macOS supported for portable crate development and CI.
-- **Optional (Stage 2+):** Flutter SDK for `apps/mobile`.
+- **Rust (`stable`):** установите через [rustup.rs](https://rustup.rs/) с компонентами `rustfmt` и `clippy`.
+- **Линкер MSVC на Windows (`link.exe`):** для сборки и запуска тестов на Windows необходима установка Visual Studio или Build Tools for Visual Studio с нагрузкой **«Разработка классических приложений на C++»** и Windows 11 SDK.
+- **Git и GitHub CLI (`gh`):** для работы с ветками, Issue и PR.
+- **С Этапа 2:** Flutter SDK для разработки `apps/mobile`.
 
 ---
 
-## Local Setup & Verification
+## Локальная проверка перед PR
 
 ```powershell
 git clone https://github.com/NoVate911/NexDeck.git
 cd NexDeck
 
-# Run formatting, compilation, clippy, unit/integration/doc tests, and release build
+# Проверка форматирования, компиляции, clippy, тестов, документации и сборки
 ./scripts/verify.ps1
 ```
 
-On Linux / macOS:
+На Linux / macOS:
 
 ```bash
 ./scripts/verify.sh
 ```
 
-### Individual Commands
-
-```powershell
-cargo fmt --all -- --check
-cargo check --workspace --all-targets --locked
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
-$env:RUSTDOCFLAGS="-D warnings"; cargo doc --workspace --no-deps --locked
-cargo build --workspace --release --locked
-```
-
-### Smoke Running Stage 0 Binaries
+### Проверка бинарников Stage 0
 
 ```powershell
 cargo run -p nexdeck-core -- --version
@@ -46,10 +34,11 @@ cargo run -p nexdeck-desktop -- --version
 
 ---
 
-## Branching & Pull Request Workflow
+## Порядок создания PR
 
-1. Create or reference a GitHub Issue.
-2. Branch off `main` using a standard prefix (`feature/*`, `fix/*`, `refactor/*`, `docs/*`, `test/*`, `ci/*`).
-3. Commit with [Conventional Commits](https://www.conventionalcommits.org/).
-4. Run `./scripts/verify.ps1` locally.
-5. Open a PR against `main`, wait for `CI Gate` and all security checks to pass, and use **Squash and Merge**.
+1. Создайте или выберите GitHub Issue.
+2. Отведите ветку от `main` (`feature/*`, `fix/*`, `refactor/*`, `docs/*`, `test/*`, `ci/*`).
+3. Пишите коммиты по **Conventional Commits** на английском (`feat(core): ...`).
+4. Обновите [`JOURNAL.md`](../../JOURNAL.md).
+5. Запустите `./scripts/verify.ps1`.
+6. Откройте PR на русском языке с `Closes #<номер>`, дождитесь прохождения `CI Gate` и проверок безопасности и выполните **Squash and Merge**.

@@ -1,29 +1,25 @@
-# Plugin System Specification (Draft — Stage 0 Contract)
+# Система плагинов (Черновик контрактов Этапа 0)
 
-The **Plugin Engine** (`crates/plugin_engine`) provides an isolated extension environment allowing community developers to build custom data sources, widgets, event handlers, and controlled actions.
+**Plugin Engine** (`crates/plugin_engine`) обеспечивает изолированное выполнение пользовательских расширений для виджетов, источников данных и разрешённых действий.
 
-> **Status:** Stage 0 establishes the manifest, permission, and resource-quota contracts. The WebAssembly runtime (`wasmtime`) will be integrated in Stage 6 ([ADR-0004](../architecture/adr/0004-plugin-engine-wasm.md)).
-
----
-
-## 1. Runtime & Isolation Guarantees
-
-- **Primary Runtime:** WebAssembly (`.wasm`) executed in an isolated sandbox.
-- **Memory Limit:** Every plugin declares `max_memory_bytes` capped by host policy.
-- **Execution Timeout & CPU Quotas:** `max_execution_ms` and `max_cpu_share_pct` prevent runaway loops from starving the Core Agent; hung modules can be terminated (`Faulted` -> `Terminated`).
-- **Lazy Activation:** When no plugins are active, the Core Agent avoids loading the WASM runtime to stay within the 2–5 MB idle RAM budget.
+> **Статус:** на Этапе 0 зафиксированы контракты `PluginManifest`, прав и квот ресурсов. Рантайм WebAssembly (`wasmtime`) будет интегрирован на **Этапе 6** ([ADR-0004](../architecture/adr/0004-plugin-engine-wasm.md)).
 
 ---
 
-## 2. Permission Model
+## 1. Изоляция и ограничения ресурсов
 
-Plugins operate under explicit least-privilege grants declared in `PluginManifest`:
+- **Основной формат:** WebAssembly (`.wasm`).
+- **Лимит памяти:** `max_memory_bytes` (не выше потолка политики хоста — 64 МиБ).
+- **Лимит времени и CPU:** `max_execution_ms` и `max_cpu_share_pct` защищают от зависания; проблемный модуль переводится в `Faulted` и принудительно останавливается.
+- **Нулевые накладные расходы в простое:** без активных плагинов WASM-рантайм не загружается в память `Core Agent`.
 
-| Permission | Capability |
+---
+
+## 2. Модель разрешений (`deny-by-default`)
+
+| Разрешение | Доступное действие |
 | --- | --- |
-| `MetricsRead` | Read allowed snapshots from `crates/monitoring` |
-| `NotificationPublish` | Submit notifications into `crates/notifications` |
-| `WidgetRender` | Supply state/data for custom dashboard widgets |
-| `AllowedCommandInvoke` | Request execution of pre-approved host actions |
-
-All OS filesystem, arbitrary network, and process spawning capabilities are denied unless explicitly bridged by a future host capability grant.
+| `MetricsRead` | Чтение разрешённых показателей из `crates/monitoring` |
+| `NotificationPublish` | Отправка уведомлений в `crates/notifications` |
+| `WidgetRender` | Передача данных для пользовательских виджетов |
+| `AllowedCommandInvoke` | Вызов только предварительно разрешённых команд |

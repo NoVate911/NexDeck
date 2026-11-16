@@ -1,12 +1,12 @@
-# NexDeck SDKs
+# Клиентские SDK для NexDeck
 
-This directory will host official client SDKs for integrating external applications with the **NexDeck Universal API** starting in **Stage 4** (`TZ.md` §7, §31).
+В этом каталоге начиная с **Этапа 4** будут размещаться официальные SDK для интеграции сторонних приложений с **Universal API**.
 
-Planned target languages:
+Планируемые языки:
 
-- **Rust** (`nexdeck-sdk` crate)
+- **Rust** (`nexdeck-sdk`)
 - **Python**
 - **TypeScript / Node.js**
 - **C# / .NET**
 
-See [Universal API Draft](../docs/api/universal-api.md) and [examples/approval_request.json](../examples/approval_request.json) for the initial contract specification.
+Контракт описан в [черновике Universal API](../docs/api/universal-api.md) и примере [`examples/approval_request.json`](../examples/approval_request.json).

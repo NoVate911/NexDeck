@@ -1,75 +1,23 @@
-# Contributor Covenant Code of Conduct
+# Кодекс поведения сообщества (Code of Conduct)
 
-## Our Pledge
+## Наши принципы
 
-We as members, contributors, and leaders pledge to make participation in our
-community a harassment-free experience for everyone, regardless of age, body
-size, visible or invisible disability, ethnicity, sex characteristics, gender
-identity and expression, level of experience, education, socio-economic status,
-nationality, personal appearance, race, caste, color, religion, or sexual
-identity and orientation.
+Мы стремимся обеспечить доброжелательную, открытую и конструктивную атмосферу для всех участников проекта **NexDeck**, независимо от опыта, возраста, пола, национальности, убеждений и личных особенностей.
 
-We pledge to act and interact in ways that contribute to an open, welcoming,
-diverse, inclusive, and healthy community.
+## Ожидаемое поведение
 
-## Our Standards
+- Уважительное и вежливое общение в Issues, Pull Requests и обсуждениях.
+- Конструктивная критика кода и архитектуры, сфокусированная на технических решениях.
+- Бережное отношение к чужому времени и готовность помогать новичкам.
 
-Examples of behavior that contributes to a positive environment for our
-community include:
+## Неприемлемое поведение
 
-- Demonstrating empathy and kindness toward other people
-- Being respectful of differing opinions, viewpoints, and experiences
-- Giving and gracefully accepting constructive feedback
-- Accepting responsibility and apologizing to those affected by our mistakes,
-  and learning from the experience
-- Focusing on what is best not just for us as individuals, but for the overall
-  community
+- Оскорбления, переход на личности, троллинг, травля и преследования.
+- Публикация чужих персональных данных без явного согласия.
+- Умышленное создание деструктивного шума или саботаж работы проекта.
 
-Examples of unacceptable behavior include:
+## Обратная связь
 
-- The use of sexualized language or imagery, and sexual attention or advances of
-  any kind
-- Trolling, insulting or derogatory comments, and personal or political attacks
-- Public or private harassment
-- Publishing others' private information, such as a physical or email address,
-  without their explicit permission
-- Other conduct which could reasonably be considered inappropriate in a
-  professional setting
+О нарушениях можно сообщить сопровождающим репозитория через [приватный канал уведомлений GitHub](https://github.com/NoVate911/NexDeck/security/advisories/new) или модераторам проекта на GitHub.
 
-## Enforcement Responsibilities
-
-Project maintainers are responsible for clarifying and enforcing our standards of
-acceptable behavior and will take appropriate and fair corrective action in
-response to any behavior that they deem inappropriate, threatening, offensive, or
-harmful.
-
-Project maintainers have the right and responsibility to remove, edit, or reject
-comments, commits, code, wiki edits, issues, and other contributions that are
-not aligned with this Code of Conduct, and will communicate reasons for
-moderation decisions when appropriate.
-
-## Scope
-
-This Code of Conduct applies within all project spaces, and also applies when
-an individual is representing the project or its community in public spaces.
-Examples of representing a project or its community include using an official
-project email address, posting via an official social media account, or acting
-as an appointed representative at an online or offline event.
-
-## Enforcement
-
-Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the project maintainer at `novate911@yandex.ru` or via GitHub
-repository issue/contact channels. All complaints will be reviewed and
-investigated promptly and fairly.
-
-All maintainers and project leaders are obligated to respect the privacy and
-security of the reporter of any incident.
-
-## Attribution
-
-This Code of Conduct is adapted from the [Contributor Covenant][homepage],
-version 2.1, available at
-https://www.contributor-covenant.org/version/2/1/code_of_conduct.html.
-
-[homepage]: https://www.contributor-covenant.org
+Адаптировано на основе [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct.html).

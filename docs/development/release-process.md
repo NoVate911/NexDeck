@@ -1,28 +1,26 @@
-# Release Process
+# Процесс выпуска релизов
 
-NexDeck adheres to **Semantic Versioning (`MAJOR.MINOR.PATCH`)** as specified in [TZ.md](../../TZ.md) (§20).
+Проект придерживается **Semantic Versioning (`MAJOR.MINOR.PATCH`)**.
 
 ---
 
-## Version Rules
+## Правила версионирования
 
-- **`0.x.y` (Pre-1.0):** Initial architecture and MVP stages (`0.1.0`, `0.2.0`, `0.3.0`, ...). Breaking API/protocol changes are permitted with clear changelog warnings.
-- **`MAJOR`:** Incompatible API or transport protocol changes after `1.0.0`.
-- **`MINOR`:** Backward-compatible features.
-- **`PATCH`:** Backward-compatible fixes and security patches.
+- **`0.x.y` (до `1.0.0`):** этап активной разработки MVP и базовых подсистем; допускаются несовместимые изменения API с предупреждением в `CHANGELOG.md`.
+- **`MAJOR`:** несовместимые изменения API или протокола после `1.0.0`.
+- **`MINOR`:** новые возможности с обратной совместимостью.
+- **`PATCH`:** исправления ошибок и уязвимостей.
 
-## Synchronizing Versions
+## Публикация релиза
 
-Before tagging a release:
-
-1. Update `version` in root `Cargo.toml` (`[workspace.package]`) and any client app manifests (`apps/mobile/pubspec.yaml` from Stage 2 onward).
-2. Update `CHANGELOG.md` by moving `[Unreleased]` entries into a dated `[X.Y.Z]` section.
-3. Merge the release preparation PR into `main` after all CI checks pass.
-4. Tag the `main` commit and push the tag:
+1. Синхронизировать `version` в корневом `Cargo.toml` (`[workspace.package]`) и клиентских манифестах (с Этапа 2).
+2. Перенести записи из `[Unreleased]` в версию `[X.Y.Z]` в `CHANGELOG.md` и обновить `JOURNAL.md`.
+3. Влить подготовительный PR в `main` после прохождения всех проверок CI.
+4. Создать и отправить тег `vX.Y.Z`:
 
 ```bash
 git tag -a v0.1.0 -m "Release v0.1.0"
 git push origin v0.1.0
 ```
 
-Pushing a `v*.*.*` tag triggers [`.github/workflows/release.yml`](../../.github/workflows/release.yml), which verifies the workspace, builds Windows release artifacts, generates `SHA256SUMS.txt`, and publishes the GitHub Release.
+Workflow [`.github/workflows/release.yml`](../../.github/workflows/release.yml) автоматически проверит workspace, соберёт Windows-бинарники, сгенерирует `SHA256SUMS.txt` и опубликует GitHub Release.
