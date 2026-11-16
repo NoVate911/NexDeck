@@ -1,0 +1,8 @@
+{
+  "type": "approval_request",
+  "application": "MyApplication",
+  "title": "Confirm Action",
+  "description": "Allow execution of the requested operation?",
+  "timeout": 60,
+  "actions": ["approve", "deny"]
+}
