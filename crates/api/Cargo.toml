@@ -1,0 +1,15 @@
+[package]
+name = "nexdeck-api"
+description = "Universal API request/response contracts and permission enforcement for NexDeck"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+nexdeck-approval.workspace = true
+nexdeck-notifications.workspace = true
+
+[lints]
+workspace = true
