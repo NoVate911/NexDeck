@@ -1,8 +1,8 @@
 //! Centralized notification center domain types, filtering, and sleep buffering.
 //!
-//! Per `TZ.md` §9, events received while the host display is off or the system
-//! is transitioning/disconnected are retained in a bounded queue for delivery
-//! once connectivity resumes.
+//! Events received while the host display is off or the system is
+//! transitioning/disconnected are retained in a bounded queue for delivery once
+//! connectivity resumes.
 
 use std::collections::VecDeque;
 
@@ -144,9 +144,13 @@ mod tests {
     #[test]
     fn bounded_queue_evicts_oldest_event() {
         let mut queue = NotificationQueue::new(2);
-        queue.push(sample_event(1, NotificationPriority::Normal, "AppA"));
-        queue.push(sample_event(2, NotificationPriority::High, "AppA"));
-        queue.push(sample_event(3, NotificationPriority::Critical, "AppB"));
+        queue.push(sample_event(1, NotificationPriority::Normal, "ExampleAppA"));
+        queue.push(sample_event(2, NotificationPriority::High, "ExampleAppA"));
+        queue.push(sample_event(
+            3,
+            NotificationPriority::Critical,
+            "ExampleAppB",
+        ));
 
         let drained = queue.drain_all();
         assert_eq!(drained.len(), 2);
@@ -159,11 +163,23 @@ mod tests {
     fn filter_respects_priority_and_muted_origins() {
         let filter = NotificationFilter {
             min_priority: NotificationPriority::High,
-            muted_origins: vec!["NoisyApp".to_owned()],
+            muted_origins: vec!["MutedExampleApp".to_owned()],
         };
 
-        assert!(!filter.matches(&sample_event(1, NotificationPriority::Normal, "GoodApp")));
-        assert!(!filter.matches(&sample_event(2, NotificationPriority::Critical, "NoisyApp")));
-        assert!(filter.matches(&sample_event(3, NotificationPriority::High, "GoodApp")));
+        assert!(!filter.matches(&sample_event(
+            1,
+            NotificationPriority::Normal,
+            "AllowedExampleApp"
+        )));
+        assert!(!filter.matches(&sample_event(
+            2,
+            NotificationPriority::Critical,
+            "MutedExampleApp"
+        )));
+        assert!(filter.matches(&sample_event(
+            3,
+            NotificationPriority::High,
+            "AllowedExampleApp"
+        )));
     }
 }

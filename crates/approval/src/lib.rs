@@ -1,7 +1,7 @@
 //! Remote Approval subsystem state machine for NexDeck.
 //!
 //! Enforces single-use request identifiers, application binding, allowed action
-//! verification, and finite expiration timeouts (`TZ.md` §7.2, §8).
+//! verification, and finite expiration timeouts.
 //! Mobile approvals explicitly do not replace Windows User Account Control (UAC).
 
 use std::collections::HashMap;
@@ -203,7 +203,7 @@ mod tests {
     fn sample_request(request_id: String, expires_at_epoch_ms: u64) -> ApprovalRequest {
         ApprovalRequest {
             request_id,
-            application: "MyApplication".to_owned(),
+            application: "ExampleApp".to_owned(),
             title: "Confirm Action".to_owned(),
             description: "Allow execution?".to_owned(),
             expires_at_epoch_ms,

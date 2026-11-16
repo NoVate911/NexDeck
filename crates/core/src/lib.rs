@@ -16,7 +16,7 @@ use nexdeck_transport::TransportKind;
 /// Crate version synchronized via workspace metadata.
 pub const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Target idle memory guidance from `TZ.md` §2 (in bytes, informational baseline).
+/// Target idle memory guidance for minimal Core Agent builds (5 MiB baseline).
 pub const TARGET_IDLE_RAM_BUDGET_BYTES: usize = 5 * 1024 * 1024;
 
 /// Configuration settings for the background `nexdeck-agent` process.
@@ -194,7 +194,7 @@ mod tests {
     fn registers_valid_plugin_manifest() {
         let mut agent = CoreAgent::new(AgentConfig::default()).expect("valid default config");
         let manifest = PluginManifest {
-            id: "dev.nexdeck.sample".to_owned(),
+            id: "org.example.sample".to_owned(),
             name: "Sample".to_owned(),
             version: "0.1.0".to_owned(),
             runtime: PluginRuntimeKind::Wasm,
