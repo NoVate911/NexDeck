@@ -68,7 +68,7 @@ flowchart TD
 | `crates/approval` | Реестр подтверждений `ApprovalRegistry`, одноразовый `request_id`, таймауты и уровни риска |
 | `crates/api` | Контракты Universal API, политики клиентов `ClientPolicy` и валидация прав |
 | `crates/plugin_engine` | Манифест `PluginManifest`, квоты памяти/CPU/времени и модель разрешений WASM |
-| `apps/desktop` | GUI-оболочка Windows 11 на чистом Rust (`egui` / `slint`) |
+| `apps/desktop` | GUI-оболочка Windows 11 на чистом Rust (`egui` / `eframe`) |
 | `apps/mobile` | Мобильный клиент Android / iOS на Flutter |
 
 ---
@@ -76,6 +76,8 @@ flowchart TD
 ## 4. Архитектурные решения (ADR)
 
 - [ADR-0001: Ядро на Rust и модульный Cargo Workspace](adr/0001-core-rust-and-workspace.md)
-- [ADR-0002: Desktop Manager на чистом Rust UI](adr/0002-desktop-ui-pure-rust.md)
+- [ADR-0002: Desktop Manager на чистом Rust UI (`egui / eframe`)](adr/0002-desktop-ui-pure-rust.md)
 - [ADR-0003: Мобильный клиент на Flutter](adr/0003-mobile-client-flutter.md)
 - [ADR-0004: WebAssembly как основной рантайм плагинов](adr/0004-plugin-engine-wasm.md)
+- [ADR-0005: Сетевой стек (`tokio + axum + rustls`) и сопряжение устройств](adr/0005-network-stack-tokio-axum-wss.md)
+- [ADR-0006: Нативный мониторинг Windows 11 на базе `windows-sys`](adr/0006-monitoring-win32-pdh.md)

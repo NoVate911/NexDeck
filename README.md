@@ -51,7 +51,7 @@
 | Компонент | Решение | Документ |
 | --- | --- | --- |
 | **Core Agent** (`nexdeck-agent`) | Rust (Edition 2024) | [ADR-0001](docs/architecture/adr/0001-core-rust-and-workspace.md) |
-| **Desktop Manager** (`nexdeck-desktop`) | Чистый Rust UI (`egui` / `slint`), отдельный процесс | [ADR-0002](docs/architecture/adr/0002-desktop-ui-pure-rust.md) |
+| **Desktop Manager** (`nexdeck-desktop`) | Чистый Rust UI (`egui` / `eframe`), отдельный процесс | [ADR-0002](docs/architecture/adr/0002-desktop-ui-pure-rust.md) |
 | **Mobile Client** (Android / iOS) | Flutter | [ADR-0003](docs/architecture/adr/0003-mobile-client-flutter.md) |
 | **Plugin Engine** | WebAssembly (`wasmtime`) | [ADR-0004](docs/architecture/adr/0004-plugin-engine-wasm.md) |
 

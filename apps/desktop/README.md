@@ -1,6 +1,6 @@
 # NexDeck Desktop Manager
 
-Отдельная графическая оболочка настройки под Windows 11 (`nexdeck-desktop`) на **чистом Rust UI** (`egui` / `slint`, см. [ADR-0002](../../docs/architecture/adr/0002-desktop-ui-pure-rust.md)).
+Отдельная графическая оболочка настройки под Windows 11 (`nexdeck-desktop`) на **чистом Rust UI** (`egui` / `eframe`, см. [ADR-0002](../../docs/architecture/adr/0002-desktop-ui-pure-rust.md)).
 
 ## Архитектурная граница
 

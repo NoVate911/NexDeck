@@ -49,7 +49,7 @@
 - **Минимальное потребление (`Core Agent`):** фоновый процесс `nexdeck-agent` ориентируется на **2–5 МБ RAM в простое**, минимальную нагрузку на CPU и не должен зависеть от GUI-фреймворков или WebView.
 - **Стек компонентов:**
   - `crates/*` (`nexdeck-core` и подсистемы) — **Rust** (Edition 2024);
-  - `apps/desktop` — чистый **Rust UI** (`egui` / `slint`, отдельный процесс через локальный IPC);
+  - `apps/desktop` — чистый **Rust UI** (`egui` / `eframe`, отдельный процесс через локальный IPC);
   - `apps/mobile` — **Flutter** (Android / iOS);
   - `crates/plugin_engine` — изолированный **WebAssembly** (`wasmtime` с жёсткими квотами памяти/CPU/времени);
   - `crates/transport` — абстракция над транспортом (MVP: Wi-Fi WebSocket; далее USB и Bluetooth).
