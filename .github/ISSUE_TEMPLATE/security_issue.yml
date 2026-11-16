@@ -1,39 +1,39 @@
-name: Security Hardening / Policy Issue
-description: Report a non-sensitive security hardening improvement (NEVER post live vulnerabilities here)
-title: "security(<scope>): <short description>"
+name: Улучшение безопасности (Security Hardening)
+description: Задача по усилению безопасности или политик (НЕ публикуйте здесь реальные уязвимости)
+title: "security(<scope>): <краткое описание>"
 labels: ["security"]
 body:
   - type: markdown
     attributes:
       value: |
-        > **WARNING:** Do **NOT** use public GitHub Issues to report exploitable vulnerabilities, auth bypasses, or secret leaks!
-        > Use **GitHub Private Vulnerability Reporting** (`Security -> Advisories -> Report a vulnerability`) or see `SECURITY.md`.
+        > **ВАЖНО:** Никогда не публикуйте рабочие уязвимости, эксплойты или утечки секретов в публичных Issues!
+        > Используйте **GitHub Private Vulnerability Reporting** (`Security -> Advisories -> Report a vulnerability`), см. `SECURITY.md`.
         >
-        > Use this template only for public security hardening improvements, policy updates, or CI security checks.
+        > Этот шаблон предназначен только для публичных задач по укреплению защиты и политик безопасности.
   - type: dropdown
     id: area
     attributes:
-      label: Security Area
+      label: Область безопасности
       options:
-        - API Authentication & Tokens
-        - Remote Approval / Nonce / Replay Protection
-        - Plugin Sandbox & Quotas
-        - Transport Encryption & Pairing
-        - CI / Dependency Audit
-        - Documentation / Threat Model
+        - Аутентификация и токены API
+        - Remote Approval и защита от повтора
+        - Песочница и квоты плагинов
+        - Шифрование транспорта и сопряжение
+        - Проверки CI и аудит зависимостей
+        - Документация / модель угроз
     validations:
       required: true
   - type: textarea
     id: details
     attributes:
-      label: Security Improvement Details
-      description: Describe the threat scenario, affected surface, and proposed safeguard.
+      label: Описание улучшения
+      description: Опишите сценарий угрозы, область воздействия и предлагаемую меру защиты.
     validations:
       required: true
   - type: checkboxes
     id: confirmation
     attributes:
-      label: Disclosure Check
+      label: Подтверждение
       options:
-        - label: I confirm this issue does not expose an active exploit, secret, or zero-day vulnerability.
+        - label: Подтверждаю, что задача не раскрывает активный эксплойт, секреты или 0-day уязвимость.
           required: true

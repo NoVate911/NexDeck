@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Private Security Vulnerability Report
+  - name: Приватное сообщение об уязвимости безопасности
     url: https://github.com/NoVate911/NexDeck/security/advisories/new
-    about: Report security vulnerabilities privately without exposing exploit details publicly.
-  - name: Technical Specification (TZ.md)
-    url: https://github.com/NoVate911/NexDeck/blob/main/TZ.md
-    about: Review the full NexDeck specification and roadmap before opening new proposals.
+    about: Отправьте отчёт об уязвимости конфиденциально, не раскрывая детали публично.
+  - name: Документация и дорожная карта проекта
+    url: https://github.com/NoVate911/NexDeck/blob/main/docs/architecture/roadmap.md
+    about: Ознакомьтесь с текущими этапами разработки и архитектурой перед созданием предложения.

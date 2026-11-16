@@ -1,16 +1,16 @@
-name: Feature Request
-description: Propose a new capability, widget, plugin API, or enhancement
-title: "feat(<scope>): <short description>"
+name: Предложение новой функции (Feature Request)
+description: Предложить новую возможность, виджет, API или улучшение
+title: "feat(<scope>): <краткое описание>"
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Please verify how your proposal aligns with the NexDeck Technical Specification (`TZ.md`) and resource efficiency goals.
+        Проверьте, как предложение соотносится с архитектурой NexDeck и ограничениями потребления ресурсов.
   - type: dropdown
     id: component
     attributes:
-      label: Target Component
+      label: Целевой компонент
       options:
         - core
         - transport
@@ -27,19 +27,19 @@ body:
   - type: textarea
     id: problem
     attributes:
-      label: Problem Statement
-      description: What limitation or use case does this address?
+      label: Какую задачу решает?
+      description: Опишите сценарий использования или текущее ограничение.
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: Proposed Solution
-      description: Describe the desired behavior, API contract, or UI experience.
+      label: Предлагаемое решение
+      description: Опишите желаемое поведение, API или интерфейс.
     validations:
       required: true
   - type: textarea
     id: constraints
     attributes:
-      label: Performance, Security, or Compatibility Considerations
-      description: Impact on idle RAM/CPU, permissions, or backward compatibility.
+      label: Влияние на производительность и безопасность
+      description: Оценка влияния на RAM/CPU, разрешения и обратную совместимость.

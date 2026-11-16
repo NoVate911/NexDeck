@@ -1,3 +1,6 @@
+# Local specification (excluded from repository tracking)
+TZ.md
+
 # Rust / Cargo
 /target/
 **/*.rs.bk

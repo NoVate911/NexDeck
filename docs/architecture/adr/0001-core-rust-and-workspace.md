@@ -1,20 +1,19 @@
-# ADR-0001: Rust Core Agent and Modular Cargo Workspace
+# ADR-0001: Фоновое ядро на Rust и модульный Cargo Workspace
 
-- **Status:** Accepted
-- **Date:** 2026-11-17
-- **Deciders:** `@NoVate911`
+- **Статус:** Принято
+- **Дата:** 2026-11-17
 
-## Context
+## Контекст
 
-NexDeck requires a background Windows 11 service (`Core Agent`) targeting 2–5 MB idle RAM, low CPU usage, memory safety, strong concurrency, and zero heavy runtime dependencies (such as JVM, .NET, or Node.js).
+Фоновый агент для Windows 11 (`Core Agent`) должен работать с минимальным потреблением памяти (ориентир 2–5 МБ RAM в простое), низкой нагрузкой на CPU и без тяжёлых внешних сред выполнения.
 
-## Decision
+## Решение
 
-1. Implement the `Core Agent` and shared domain subsystems in **Rust** (Edition 2024).
-2. Structure the codebase as a modular Cargo workspace (`crates/*`, `apps/desktop`, `tests/integration`) separating core orchestration, transport, hardware monitoring, notifications, remote approval, Universal API, and plugin execution.
-3. Enforce strict compiler/clippy lints, `cargo-deny` license/advisory checks, and `#![forbid(unsafe_code)]` in pure contract crates.
+1. Реализовать `Core Agent` и все основные подсистемы на **Rust** (Edition 2024).
+2. Разделить проект на модульный Cargo Workspace (`crates/*`, `apps/desktop`, `tests/integration`) с чёткими границами ответственности.
+3. Включить строгие правила `clippy`, `missing_docs`, проверку зависимостей `cargo-deny` и запрет `unsafe_code` в контрактных крейтах.
 
-## Consequences
+## Последствия
 
-- **Positive:** Predictable native memory usage, single compact binary distribution, strict compile-time safety, and clean crate-level boundaries.
-- **Negative:** Windows low-level hardware sensor APIs require careful safe FFI wrappers (`windows-sys` in Stage 1+) rather than managed runtime libraries.
+- **Плюсы:** предсказуемое потребление памяти, компактные бинарные файлы, строгая типизация и безопасность памяти.
+- **Минусы:** доступ к низкоуровневым датчикам Windows потребует аккуратных безопасных обёрток над системным API на следующих этапах.

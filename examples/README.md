@@ -1,5 +1,5 @@
-# NexDeck Examples
+# Примеры использования NexDeck
 
-- [`approval_request.json`](approval_request.json): Example Universal API remote approval payload from `TZ.md` §7.1.
+- [`approval_request.json`](approval_request.json) — демонстрационный пример JSON-запроса подтверждения для Universal API.
 
-Additional SDK integration samples and sample WASM plugins will be added in Stage 4 and Stage 6.
+Все значения в примерах носят исключительно демонстрационный характер. Дополнительные примеры SDK и WASM-плагинов будут добавлены на Этапах 4 и 6.

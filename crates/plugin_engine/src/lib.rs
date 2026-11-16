@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn default_manifest_limits_validate_cleanly() {
         let manifest = PluginManifest {
-            id: "dev.nexdeck.clock".to_owned(),
+            id: "org.example.clock".to_owned(),
             name: "Clock Widget".to_owned(),
             version: "0.1.0".to_owned(),
             runtime: PluginRuntimeKind::Wasm,
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn rejects_excessive_memory_quota() {
         let manifest = PluginManifest {
-            id: "dev.nexdeck.heavy".to_owned(),
+            id: "org.example.heavy".to_owned(),
             name: "Heavy Plugin".to_owned(),
             version: "0.1.0".to_owned(),
             runtime: PluginRuntimeKind::Wasm,

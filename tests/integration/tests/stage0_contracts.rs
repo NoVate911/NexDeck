@@ -17,18 +17,18 @@ use nexdeck_transport::{Envelope, MessageKind};
 fn universal_api_approval_and_notification_flow_through_core() {
     let mut agent = CoreAgent::new(AgentConfig::default()).expect("default config should be valid");
     let client = ClientPolicy::new(
-        "client-ide-1",
-        "MyApplication",
+        "example-client-1",
+        "ExampleApp",
         [
             ApiPermission::RequestApproval,
             ApiPermission::SendNotification,
         ],
     );
-    let req_id = format!("req-2026-{}", 1);
+    let req_id = format!("req-example-{}", 1);
 
     let payload = ApprovalRequestPayload {
         request_id: req_id.clone(),
-        application: "MyApplication".to_owned(),
+        application: "ExampleApp".to_owned(),
         title: "Confirm Action".to_owned(),
         description: "Allow execution of the requested operation?".to_owned(),
         timeout_secs: 60,
@@ -78,7 +78,7 @@ fn transport_monitoring_and_plugin_contracts_validate() {
     assert!((mem.usage_pct() - 25.0).abs() < 0.01);
 
     let plugin = PluginManifest {
-        id: "dev.nexdeck.metrics".to_owned(),
+        id: "org.example.metrics".to_owned(),
         name: "System Metrics".to_owned(),
         version: "0.1.0".to_owned(),
         runtime: PluginRuntimeKind::Wasm,

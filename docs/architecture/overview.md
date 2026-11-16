@@ -1,29 +1,29 @@
-# NexDeck Architecture Overview
+# Архитектура NexDeck
 
-NexDeck follows a **decoupled modular architecture** designed to keep the background Windows 11 host agent ultra-lightweight while enabling rich mobile dashboards, external application integrations, and sandboxed plugins.
+NexDeck строится по **модульной развязанной архитектуре**, чтобы фоновый агент на Windows 11 оставался максимально лёгким, а логика не зависела от конкретного транспорта или GUI.
 
 ---
 
-## 1. High-Level System Architecture
+## 1. Общая схема взаимодействия
 
 ```mermaid
 flowchart LR
-    ThirdParty["Third-Party Apps & SDKs"] -->|IPC / HTTP / WebSocket| API["crates/api (Universal API)"]
+    ThirdParty["Сторонние приложения и SDK"] -->|IPC / HTTP / WebSocket| API["crates/api (Universal API)"]
     API --> Approval["crates/approval (Remote Approval)"]
     API --> Notify["crates/notifications (Notification Center)"]
-    Plugins["WASM Plugins"] --> PluginEngine["crates/plugin_engine"]
+    Plugins["WASM-плагины"] --> PluginEngine["crates/plugin_engine"]
     PluginEngine --> Core["crates/core (Core Agent)"]
-    Monitoring["crates/monitoring (Hardware Collectors)"] --> Core
+    Monitoring["crates/monitoring (Сборщики метрик)"] --> Core
     Approval --> Core
     Notify --> Core
-    Desktop["apps/desktop (Pure Rust UI)"] <-->|Local IPC / API| API
+    Desktop["apps/desktop (Чистый Rust UI)"] <-->|Локальный IPC / API| API
     Core <--> Transport["crates/transport (Wi-Fi WS / USB / BT)"]
     Transport <--> Mobile["apps/mobile (Flutter Android/iOS)"]
 ```
 
 ---
 
-## 2. Crate & Component Dependency Graph
+## 2. Зависимости крейтов
 
 ```mermaid
 flowchart TD
@@ -46,37 +46,36 @@ flowchart TD
     Api --> Approval
     Api --> Notifications
     Desktop --> Api
-    Desktop --> Monitoring
 ```
 
-### Design Rules for Dependencies
+### Ключевые архитектурные правила
 
-1. **Zero UI in Core:** `nexdeck-core` must never depend on GUI frameworks or WebView engines.
-2. **Transport Independence:** Domain crates (`monitoring`, `notifications`, `approval`, `api`, `plugin_engine`) must not depend on concrete WebSocket, USB, or Bluetooth implementations — all network/device I/O sits behind `nexdeck-transport` traits.
-3. **Separate Desktop Process:** `apps/desktop` (`nexdeck-desktop`) runs as an on-demand GUI process that connects to `nexdeck-agent` over local IPC/API so closing the configurator leaves zero UI memory overhead in the background agent.
-4. **Controlled Plugin Surface:** Plugins interact only with capabilities granted in `PluginManifest` and validated by `nexdeck-plugin-engine`.
+1. **Никакого GUI в ядре:** `nexdeck-core` не зависит от графических библиотек и WebView.
+2. **Независимость от транспорта:** доменные модули работают через абстракцию `Transport` и `Envelope`, не зная о деталях WebSocket, USB или Bluetooth.
+3. **Отдельный процесс настройки:** `apps/desktop` подключается к агенту по локальному IPC/API и не занимает память в фоне после закрытия окна.
+4. **Контролируемые плагины:** расширения получают доступ только к возможностям, явно описанным в `PluginManifest`.
 
 ---
 
-## 3. Component Responsibilities
+## 3. Назначение компонентов
 
-| Crate / App | Responsibility |
+| Компонент | Зона ответственности |
 | --- | --- |
-| `crates/core` | Headless background agent (`nexdeck-agent`), lifecycle, configuration, pairing state, orchestration loop |
-| `crates/transport` | Transport traits (`Transport`), connection state machine, framing envelopes, protocol versioning |
-| `crates/monitoring` | Platform-independent telemetry snapshot types (`CPU`, `RAM`, `GPU`, `Disk`, `Network`, `Battery`) and collector traits |
-| `crates/notifications` | Notification model, priority levels, filtering rules, bounded sleep/offline retention queue |
-| `crates/approval` | Single-use `request_id` approval state machine, expiration checks, risk levels, decision audit log |
-| `crates/api` | Universal API contracts (`UniversalRequest`, `UniversalResponse`), client identities, scoped permissions |
-| `crates/plugin_engine` | WASM plugin manifest validation, capability permissions, CPU/memory/time resource quotas |
-| `apps/desktop` | Pure-Rust Windows 11 GUI manager (`egui` / `slint`) for pairing, panels, security, and extensions |
-| `apps/mobile` | Cross-platform Flutter client (Android & iOS) for live dashboards, controls, notifications, and approvals |
+| `crates/core` | Фоновый агент (`nexdeck-agent`), конфигурация, жизненный цикл и координация подсистем |
+| `crates/transport` | Трейт `Transport`, машина состояний соединения, фреймы `Envelope` и версионирование протокола |
+| `crates/monitoring` | Модели аппаратных метрик (`CPU`, `RAM`, `GPU`, `Disk`, `Network`, `Battery`) и трейт `MetricCollector` |
+| `crates/notifications` | События, приоритеты, фильтрация и ограниченная очередь сохранения при сне/разрыве связи |
+| `crates/approval` | Реестр подтверждений `ApprovalRegistry`, одноразовый `request_id`, таймауты и уровни риска |
+| `crates/api` | Контракты Universal API, политики клиентов `ClientPolicy` и валидация прав |
+| `crates/plugin_engine` | Манифест `PluginManifest`, квоты памяти/CPU/времени и модель разрешений WASM |
+| `apps/desktop` | GUI-оболочка Windows 11 на чистом Rust (`egui` / `slint`) |
+| `apps/mobile` | Мобильный клиент Android / iOS на Flutter |
 
 ---
 
-## 4. Architectural Decision Records (ADRs)
+## 4. Архитектурные решения (ADR)
 
-- [ADR-0001: Rust Core & Modular Cargo Workspace](adr/0001-core-rust-and-workspace.md)
-- [ADR-0002: Pure-Rust Desktop Manager UI](adr/0002-desktop-ui-pure-rust.md)
-- [ADR-0003: Flutter for Mobile Client](adr/0003-mobile-client-flutter.md)
-- [ADR-0004: WebAssembly Primary Plugin Runtime](adr/0004-plugin-engine-wasm.md)
+- [ADR-0001: Ядро на Rust и модульный Cargo Workspace](adr/0001-core-rust-and-workspace.md)
+- [ADR-0002: Desktop Manager на чистом Rust UI](adr/0002-desktop-ui-pure-rust.md)
+- [ADR-0003: Мобильный клиент на Flutter](adr/0003-mobile-client-flutter.md)
+- [ADR-0004: WebAssembly как основной рантайм плагинов](adr/0004-plugin-engine-wasm.md)

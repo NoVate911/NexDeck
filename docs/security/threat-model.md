@@ -1,34 +1,34 @@
-# NexDeck Threat Model & Security Boundaries
+# Модель угроз и границы безопасности
 
-Security is a core design invariant in NexDeck ([TZ.md](../../TZ.md) §7.2, §8, §25).
-
----
-
-## 1. Trust Boundaries
-
-1. **Host OS (`Windows 11`) <-> `nexdeck-agent`:**
-   - Runs as a standard user background process by default.
-   - Remote approvals **never** bypass or replace Windows UAC (`TZ.md` §8).
-   - Remote control actions are checked against an explicit allowlist; destructive actions (power off, reboot, process termination) require explicit authorization.
-2. **`nexdeck-agent` <-> Mobile Client (`apps/mobile`):**
-   - Devices must undergo explicit pairing before telemetry, control, or approval channels open.
-   - Transport frames are encrypted and authenticated (TLS + paired device identity in Stage 1+ WebSocket transport).
-3. **`nexdeck-agent` <-> Third-Party Applications (`Universal API`):**
-   - Applications authenticate with unique client IDs and revocable scoped tokens (`ApiTokenPolicy`).
-   - Input payloads are strictly bounded and validated before entering `crates/approval` or `crates/notifications`.
-4. **`nexdeck-agent` <-> Extensions (`crates/plugin_engine`):**
-   - Plugins execute inside a sandboxed WASM runtime with explicit permissions and strict memory/CPU/time quotas.
+Безопасность заложена в архитектуру NexDeck на уровне контрактов подсистем.
 
 ---
 
-## 2. Key Threats & Mitigations
+## 1. Границы доверия
 
-| Threat | Mitigation | Crate / Control |
+1. **ОС хоста (`Windows 11`) <-> `nexdeck-agent`:**
+   - Агент работает как обычный фоновый пользовательский процесс.
+   - Подтверждение действий на телефоне **никогда не заменяет и не обходит штатный Windows UAC**.
+   - Опасные команды (выключение, перезагрузка, завершение процессов) требуют явной авторизации и разрешённых политик.
+2. **`nexdeck-agent` <-> Мобильный клиент:**
+   - Обмен данными разрешён только после явного сопряжения и аутентификации устройства.
+   - На Этапе 1+ транспорт WebSocket защищается шифрованием и проверкой идентичности устройства.
+3. **`nexdeck-agent` <-> Сторонние приложения (`Universal API`):**
+   - Обязательная аутентификация по `client_id` и отзываемому токену; права минимальны (`deny-by-default`).
+   - Все входные данные валидируются до передачи в `crates/approval` и `crates/notifications`.
+4. **`nexdeck-agent` <-> Плагины (`crates/plugin_engine`):**
+   - Плагины изолированы в песочнице WebAssembly с лимитами памяти, времени и CPU.
+
+---
+
+## 2. Основные угрозы и меры защиты
+
+| Угроза | Мера защиты | Модуль / контроль |
 | --- | --- | --- |
-| Approval replay attack | Single-use unique `request_id` tracked in `ApprovalRegistry`; duplicate decisions rejected | `crates/approval` |
-| Stale approval accepted late | Strict `expires_at_epoch_ms` checks before recording any decision | `crates/approval` |
-| Unauthorized approval action | Decision action must match request's `allowed_actions` list | `crates/approval` |
-| Privilege escalation via Universal API | Least-privilege `ApiPermission` bitset/set, token revocation, no unrestricted OS shell | `crates/api` |
-| Malicious or hung plugin | WASM memory caps, execution timeout (`max_execution_ms`), fuel/epoch kill switch | `crates/plugin_engine` |
-| Sleep buffer memory exhaustion | Bounded capacity queue (`NotificationQueue`) with deterministic eviction | `crates/notifications` |
-| Secret leaks or vulnerable crates | GitHub Push Protection, Gitleaks CI scan, CodeQL (`rust`), `cargo-deny`, Dependabot | `.github/workflows/security.yml` |
+| Повторная отправка подтверждения (replay) | Одноразовый `request_id` в `ApprovalRegistry`, отклонение повторных решений | `crates/approval` |
+| Позднее подтверждение просроченного запроса | Проверка `expires_at_epoch_ms` перед фиксацией решения | `crates/approval` |
+| Подмена действия подтверждения | Разрешены только действия из списка `allowed_actions` запроса | `crates/approval` |
+| Повышение привилегий через API | Скоуп `ApiPermission`, отзыв клиентов, запрет произвольной командной строки | `crates/api` |
+| Зависание или переполнение памяти плагином | Лимиты `max_memory_bytes`, `max_execution_ms` и принудительная остановка | `crates/plugin_engine` |
+| Исчерпание памяти очередью уведомлений во сне | Кольцевой ограниченный буфер `NotificationQueue` | `crates/notifications` |
+| Утечка секретов и уязвимые зависимости | Push Protection, `Secret Scan`, `CodeQL (rust)`, `cargo-deny`, Dependabot | `.github/workflows/security.yml` |

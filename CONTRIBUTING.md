@@ -1,78 +1,50 @@
-# Contributing to NexDeck
+# Участие в разработке NexDeck
 
-Thank you for your interest in contributing to **NexDeck**! This document
-defines the development rules, Git workflow, commit convention, and quality
-gates for the repository.
+Спасибо за интерес к развитию **NexDeck**! Ниже собраны основные правила разработки, работы с Git и проверки качества кода.
 
-## Development Workflow
+## Рабочий процесс (Git Flow)
 
-1. **Find or create an Issue:** Every change should correspond to a GitHub Issue.
-2. **Branch from `main`:** Direct pushes to `main` are prohibited. Create a
-   topic branch matching one of the standard prefixes:
-   - `feature/<short-name>` — new functionality
-   - `fix/<short-name>` — bug fixes
-   - `refactor/<short-name>` — internal code improvements
-   - `docs/<short-name>` — documentation updates
-   - `test/<short-name>` — test additions or harnesses
-   - `ci/<short-name>` — CI/CD, GitHub settings, and automation
-3. **Keep changes focused:** One logical change per Pull Request. Do not bundle
-   unrelated modifications.
-4. **Verify locally before opening a PR:**
+1. **Issue перед задачей:** каждое изменение должно быть привязано к GitHub Issue.
+2. **Ветки только от `main`:** прямой `push` в `main` запрещён. Используйте префиксы:
+   - `feature/<имя>` — новая функциональность
+   - `fix/<имя>` — исправление ошибок
+   - `refactor/<имя>` — рефакторинг
+   - `docs/<имя>` — документация
+   - `test/<имя>` — тесты
+   - `ci/<имя>` — настройка CI/CD и репозитория
+3. **Один PR — одна задача:** не объединяйте несвязанные изменения.
+4. **Обновление журнала:** каждый PR обязан обновлять [`JOURNAL.md`](JOURNAL.md).
+5. **Локальная проверка перед PR:**
    - Windows (PowerShell): `./scripts/verify.ps1`
-   - Linux / macOS / Git Bash: `./scripts/verify.sh`
-5. **Open a Pull Request:** Fill out all sections of the PR template and link
-   the related Issue (`Closes #<id>`).
-6. **Wait for all CI & security checks:** All required status checks must pass
-   and all conflicts must be resolved before **Squash and Merge**.
+   - Linux / macOS: `./scripts/verify.sh`
+6. **Оформление PR:** заполняйте шаблон PR на русском языке и указывайте связь с Issue (`Closes #<номер>`).
+7. **Слияние:** используется **Squash and Merge** после успешного прохождения всех обязательных проверок CI и безопасности.
 
-## Conventional Commits
+## Формат коммитов (Conventional Commits)
 
-All commits and PR titles must follow
-[Conventional Commits](https://www.conventionalcommits.org/):
+Сообщения коммитов пишутся на английском в формате [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```text
-<type>(<scope>): <short imperative summary>
+<type>(<scope>): <краткое описание в повелительном наклонении>
 ```
 
-Common types: `feat`, `fix`, `refactor`, `docs`, `test`, `ci`, `chore`, `perf`,
-`security`.
+Типы: `feat`, `fix`, `refactor`, `docs`, `test`, `ci`, `chore`, `perf`, `security`.
 
-Examples:
+Примеры:
 
 ```text
 feat(core): add system monitoring
 fix(api): resolve connection timeout
-refactor(transport): simplify websocket layer
 docs(readme): update installation guide
-test(core): add memory monitoring tests
-ci(github): add rust workflow
-chore(deps): update dependencies
 ```
 
-## Code Quality & Architecture Rules
+## Качество кода и данные
 
-- Follow official Rust idioms, `rustfmt`, and strict `clippy` lints
-  (`-D warnings`).
-- Keep Core Agent dependencies minimal and memory footprint aligned with the
-  2–5 MB idle target (see [TZ.md](TZ.md) and
-  [docs/architecture/overview.md](docs/architecture/overview.md)).
-- Document all public APIs (`#![warn(missing_docs)]` / `RUSTDOCFLAGS="-D warnings"`).
-- Write unit tests for invariants and integration tests for cross-crate flows.
-- Never commit tokens, private keys, certificates, or unverified binaries.
-- Never place placeholder/stub implementations that pretend unimplemented
-  behavior works.
+- Соблюдайте официальные стандарты Rust (`rustfmt`, `clippy -- -D warnings`, `RUSTDOCFLAGS="-D warnings" cargo doc`).
+- Поддерживайте минимальное количество зависимостей и целевой бюджет памяти `Core Agent` (**2–5 МБ RAM в простое**).
+- Используйте только вымышленные примеры данных (никаких реальных токенов, паролей, личных почт или ключей).
+- Проект использует **Apache License 2.0** ([LICENSE](LICENSE)); совместимость лицензий зависимостей проверяется через `cargo-deny`.
 
-## Licensing Policy
+## Версионирование
 
-NexDeck is licensed under the **Apache License 2.0** (see [LICENSE](LICENSE)).
-
-- Do not add dependencies with incompatible licenses (e.g., GPL/AGPL) without
-  maintainer approval; `deny.toml` enforces allowed SPDX licenses in CI.
-- Independent plugins may choose their own compatible licensing terms.
-- Never copy external code without verifying license compatibility and
-  attribution requirements.
-
-## Versioning
-
-NexDeck follows **Semantic Versioning (`MAJOR.MINOR.PATCH`)**. Before `1.0.0`,
-APIs may evolve between `0.x` releases with documented breaking-change notices.
+Используется **Semantic Versioning (`MAJOR.MINOR.PATCH`)**. До версии `1.0.0` контракты могут уточняться между минорными релизами `0.x`.

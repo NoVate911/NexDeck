@@ -1,16 +1,16 @@
-name: Bug Report
-description: Report a defect or unexpected behavior in NexDeck
-title: "fix(<scope>): <short description>"
+name: Сообщение об ошибке (Bug Report)
+description: Сообщить о дефекте или некорректной работе NexDeck
+title: "fix(<scope>): <краткое описание>"
 labels: ["bug", "triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thank you for reporting an issue! Please check existing issues first and do not include secrets, tokens, or personal credentials.
+        Спасибо за отчёт! Перед отправкой убедитесь, что похожей задачи ещё нет, и не прикладывайте секреты, токены или реальные ключи.
   - type: dropdown
     id: component
     attributes:
-      label: Component
+      label: Компонент
       options:
         - core
         - transport
@@ -27,28 +27,28 @@ body:
   - type: input
     id: version
     attributes:
-      label: NexDeck Version / Commit
-      placeholder: "e.g., 0.1.0 or commit SHA"
+      label: Версия NexDeck или хэш коммита
+      placeholder: "например: 0.1.0"
     validations:
       required: true
   - type: input
     id: environment
     attributes:
-      label: Environment
-      placeholder: "e.g., Windows 11 24H2 / Android 15 / iOS 18"
+      label: Окружение
+      placeholder: "например: Windows 11 24H2 / Android / iOS"
     validations:
       required: true
   - type: textarea
     id: description
     attributes:
-      label: What happened?
-      description: Clear description of the bug and expected behavior.
+      label: Что произошло?
+      description: Опишите фактическое и ожидаемое поведение.
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
-      label: Steps to Reproduce
+      label: Шаги воспроизведения
       value: |
         1.
         2.
@@ -58,5 +58,5 @@ body:
   - type: textarea
     id: logs
     attributes:
-      label: Relevant Logs / Output
+      label: Логи или вывод ошибки
       render: text

@@ -73,7 +73,7 @@ impl ClientPolicy {
     }
 }
 
-/// Universal API payload for creating a remote approval request (`TZ.md` §7.1).
+/// Universal API payload for creating a remote approval request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApprovalRequestPayload {
     /// Single-use unique request ID protecting against replay attacks.
@@ -196,11 +196,15 @@ mod tests {
     #[test]
     fn unauthorized_or_revoked_client_is_blocked() {
         let mut reg = ApprovalRegistry::new();
-        let mut policy = ClientPolicy::new("app-1", "MyApp", [ApiPermission::ReadMetrics]);
+        let mut policy = ClientPolicy::new(
+            "example-client-1",
+            "ExampleApp",
+            [ApiPermission::ReadMetrics],
+        );
 
         let payload = ApprovalRequestPayload {
             request_id: test_id(1),
-            application: "MyApp".to_owned(),
+            application: "ExampleApp".to_owned(),
             title: "Confirm".to_owned(),
             description: "Proceed?".to_owned(),
             timeout_secs: 60,
@@ -217,19 +221,23 @@ mod tests {
         policy.revoked = true;
         assert_eq!(
             submit_approval_request(&policy, &mut reg, payload, 1_000),
-            Err(ApiError::ClientRevoked("app-1".to_owned()))
+            Err(ApiError::ClientRevoked("example-client-1".to_owned()))
         );
     }
 
     #[test]
     fn valid_approval_payload_is_registered() {
         let mut reg = ApprovalRegistry::new();
-        let policy = ClientPolicy::new("app-2", "MyApp", [ApiPermission::RequestApproval]);
+        let policy = ClientPolicy::new(
+            "example-client-2",
+            "ExampleApp",
+            [ApiPermission::RequestApproval],
+        );
         let req_id = test_id(2);
 
         let payload = ApprovalRequestPayload {
             request_id: req_id.clone(),
-            application: "MyApp".to_owned(),
+            application: "ExampleApp".to_owned(),
             title: "Confirm".to_owned(),
             description: "Allow execution?".to_owned(),
             timeout_secs: 60,

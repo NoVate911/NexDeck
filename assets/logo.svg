@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="NexDeck Logo">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B1220"/>
+      <stop offset="100%" stop-color="#162238"/>
+    </linearGradient>
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#34D399"/>
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0EA5E9"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="emeraldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Base Rounded Square -->
+  <rect x="12" y="12" width="232" height="232" rx="48" fill="url(#bgGrad)" stroke="url(#borderGrad)" stroke-width="5"/>
+
+  <!-- Top-Left Tile: Telemetry Pulse -->
+  <rect x="38" y="38" width="82" height="82" rx="18" fill="#1E293B" stroke="#334155" stroke-width="2"/>
+  <path d="M50 82 L64 82 L72 64 L82 96 L92 74 L98 82 L108 82" fill="none" stroke="url(#cyanGrad)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Top-Right Tile: Remote Approval Check -->
+  <rect x="136" y="38" width="82" height="82" rx="18" fill="url(#emeraldGrad)"/>
+  <path d="M159 80 L172 93 L196 66" fill="none" stroke="#FFFFFF" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Bottom-Left Tile: Deck Controls -->
+  <rect x="38" y="136" width="82" height="82" rx="18" fill="#1E293B" stroke="#334155" stroke-width="2"/>
+  <line x1="60" y1="156" x2="60" y2="198" stroke="#475569" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="60" cy="170" r="7" fill="#38BDF8"/>
+  <line x1="79" y1="156" x2="79" y2="198" stroke="#475569" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="79" cy="186" r="7" fill="#34D399"/>
+  <line x1="98" y1="156" x2="98" y2="198" stroke="#475569" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="98" cy="164" r="7" fill="#38BDF8"/>
+
+  <!-- Bottom-Right Tile: Modular Link / Bridge -->
+  <rect x="136" y="136" width="82" height="82" rx="18" fill="url(#cyanGrad)"/>
+  <rect x="155" y="154" width="22" height="46" rx="6" fill="none" stroke="#FFFFFF" stroke-width="4.5"/>
+  <line x1="163" y1="191" x2="169" y2="191" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M185 168 A16 16 0 0 1 185 186" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M194 160 A26 26 0 0 1 194 194" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round"/>
+</svg>

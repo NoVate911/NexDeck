@@ -1,8 +1,8 @@
 {
   "type": "approval_request",
-  "application": "MyApplication",
-  "title": "Confirm Action",
-  "description": "Allow execution of the requested operation?",
+  "application": "ExampleApp",
+  "title": "Подтверждение действия",
+  "description": "Разрешить выполнение тестовой операции?",
   "timeout": 60,
   "actions": ["approve", "deny"]
 }
