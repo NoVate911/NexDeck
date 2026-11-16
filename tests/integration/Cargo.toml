@@ -1,0 +1,20 @@
+[package]
+name = "nexdeck-integration-tests"
+description = "Cross-crate integration tests for NexDeck workspace contracts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dev-dependencies]
+nexdeck-api.workspace = true
+nexdeck-approval.workspace = true
+nexdeck-core.workspace = true
+nexdeck-monitoring.workspace = true
+nexdeck-notifications.workspace = true
+nexdeck-plugin-engine.workspace = true
+nexdeck-transport.workspace = true
+
+[lints]
+workspace = true

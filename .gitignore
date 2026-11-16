@@ -1,0 +1,45 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+*.pdb
+*.d
+*.rlib
+*.rmeta
+*.crate
+
+# Flutter / Dart (Mobile Client)
+apps/mobile/.dart_tool/
+apps/mobile/.flutter-plugins
+apps/mobile/.flutter-plugins-dependencies
+apps/mobile/build/
+apps/mobile/.packages
+apps/mobile/ios/Pods/
+apps/mobile/android/.gradle/
+apps/mobile/android/local.properties
+
+# Node / Web tooling
+node_modules/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Environment & local secrets
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini

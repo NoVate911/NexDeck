@@ -1,0 +1,24 @@
+name: Documentation Issue
+description: Report missing, unclear, or outdated documentation
+title: "docs(<scope>): <short description>"
+labels: ["documentation"]
+body:
+  - type: input
+    id: location
+    attributes:
+      label: Document or Section
+      placeholder: "e.g., README.md, docs/api/universal-api.md, rustdoc"
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: What needs improvement?
+      description: Describe what is missing, inaccurate, or unclear.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested Improvement
+      description: Optional wording, examples, or diagram ideas.

@@ -1,0 +1,62 @@
+name: Bug Report
+description: Report a defect or unexpected behavior in NexDeck
+title: "fix(<scope>): <short description>"
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! Please check existing issues first and do not include secrets, tokens, or personal credentials.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - core
+        - transport
+        - monitoring
+        - plugin_engine
+        - api
+        - notifications
+        - approval
+        - desktop
+        - mobile
+        - ci / build
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: NexDeck Version / Commit
+      placeholder: "e.g., 0.1.0 or commit SHA"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "e.g., Windows 11 24H2 / Android 15 / iOS 18"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Clear description of the bug and expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs / Output
+      render: text

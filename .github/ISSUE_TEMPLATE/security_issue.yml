@@ -1,0 +1,39 @@
+name: Security Hardening / Policy Issue
+description: Report a non-sensitive security hardening improvement (NEVER post live vulnerabilities here)
+title: "security(<scope>): <short description>"
+labels: ["security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > **WARNING:** Do **NOT** use public GitHub Issues to report exploitable vulnerabilities, auth bypasses, or secret leaks!
+        > Use **GitHub Private Vulnerability Reporting** (`Security -> Advisories -> Report a vulnerability`) or see `SECURITY.md`.
+        >
+        > Use this template only for public security hardening improvements, policy updates, or CI security checks.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Security Area
+      options:
+        - API Authentication & Tokens
+        - Remote Approval / Nonce / Replay Protection
+        - Plugin Sandbox & Quotas
+        - Transport Encryption & Pairing
+        - CI / Dependency Audit
+        - Documentation / Threat Model
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Security Improvement Details
+      description: Describe the threat scenario, affected surface, and proposed safeguard.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Disclosure Check
+      options:
+        - label: I confirm this issue does not expose an active exploit, secret, or zero-day vulnerability.
+          required: true

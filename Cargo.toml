@@ -1,0 +1,43 @@
+[workspace]
+resolver = "3"
+members = [
+    "apps/desktop",
+    "crates/api",
+    "crates/approval",
+    "crates/core",
+    "crates/monitoring",
+    "crates/notifications",
+    "crates/plugin_engine",
+    "crates/transport",
+    "tests/integration",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/NoVate911/NexDeck"
+
+[workspace.dependencies]
+nexdeck-api = { version = "0.1.0", path = "crates/api" }
+nexdeck-approval = { version = "0.1.0", path = "crates/approval" }
+nexdeck-core = { version = "0.1.0", path = "crates/core" }
+nexdeck-monitoring = { version = "0.1.0", path = "crates/monitoring" }
+nexdeck-notifications = { version = "0.1.0", path = "crates/notifications" }
+nexdeck-plugin-engine = { version = "0.1.0", path = "crates/plugin_engine" }
+nexdeck-transport = { version = "0.1.0", path = "crates/transport" }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
