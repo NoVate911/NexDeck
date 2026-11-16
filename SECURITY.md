@@ -43,7 +43,7 @@ Please include:
   replace, bypass, or automate Windows User Account Control (UAC).
 - **Universal API & Approval:** Third-party applications must authenticate,
   use least-privilege scopes, and bind every approval request to a single-use
-  nonce and finite expiration timeout.
+  `request_id` and finite expiration timeout.
 - **Plugin Isolation:** Extensions must run in an isolated sandbox with
   explicit capability grants and strict resource quotas.
 - **Dependency Hygiene:** All third-party crates must pass `cargo-deny` license

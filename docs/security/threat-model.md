@@ -25,7 +25,7 @@ Security is a core design invariant in NexDeck ([TZ.md](../../TZ.md) §7.2, §8,
 
 | Threat | Mitigation | Crate / Control |
 | --- | --- | --- |
-| Approval replay attack | Single-use cryptographic/unique `nonce` tracked in `ApprovalRegistry`; duplicate decisions rejected | `crates/approval` |
+| Approval replay attack | Single-use unique `request_id` tracked in `ApprovalRegistry`; duplicate decisions rejected | `crates/approval` |
 | Stale approval accepted late | Strict `expires_at_epoch_ms` checks before recording any decision | `crates/approval` |
 | Unauthorized approval action | Decision action must match request's `allowed_actions` list | `crates/approval` |
 | Privilege escalation via Universal API | Least-privilege `ApiPermission` bitset/set, token revocation, no unrestricted OS shell | `crates/api` |

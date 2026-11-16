@@ -32,7 +32,7 @@ This document captures the structured functional and non-functional requirements
 | `FR-06` | Widgets | Text, numeric readouts, buttons, toggles, charts, indicators, images, icons, custom views | Stage 3 |
 | `FR-07` | Desktop Manager | Separate pure-Rust Windows GUI (`apps/desktop`) to configure agent, devices, security, extensions, and connections | Stage 1–3 |
 | `FR-08` | Universal API | Local IPC, HTTP, and WebSocket APIs + SDKs for external apps to send notifications, publish events, read allowed telemetry, and request approvals | Stage 4 |
-| `FR-09` | Remote Approval | Approval request routing to mobile with app binding, description, risk levels, one-time ID/nonce, expiration timeout, and request history | Stage 5 |
+| `FR-09` | Remote Approval | Approval request routing to mobile with app binding, description, risk levels, one-time `request_id`, expiration timeout, and request history | Stage 5 |
 | `FR-10` | Notification Center | Centralized Windows, app, hardware-alert (thermal/disk), and custom events with filters, priorities, history, and sleep buffering | Stage 5 |
 | `FR-11` | Remote Control | Launch apps, volume & media playback, hotkeys, process termination, allowed commands, authenticated shutdown/reboot | Stage 2–5 |
 | `FR-12` | Plugin Engine | Isolated WebAssembly extensions with scoped permissions, resource quotas (CPU/RAM/time), and termination of hung plugins | Stage 6 |

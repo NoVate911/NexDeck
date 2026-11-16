@@ -66,7 +66,7 @@ flowchart TD
 | `crates/transport` | Transport traits (`Transport`), connection state machine, framing envelopes, protocol versioning |
 | `crates/monitoring` | Platform-independent telemetry snapshot types (`CPU`, `RAM`, `GPU`, `Disk`, `Network`, `Battery`) and collector traits |
 | `crates/notifications` | Notification model, priority levels, filtering rules, bounded sleep/offline retention queue |
-| `crates/approval` | Single-use nonce approval state machine, expiration checks, risk levels, decision audit log |
+| `crates/approval` | Single-use `request_id` approval state machine, expiration checks, risk levels, decision audit log |
 | `crates/api` | Universal API contracts (`UniversalRequest`, `UniversalResponse`), client identities, scoped permissions |
 | `crates/plugin_engine` | WASM plugin manifest validation, capability permissions, CPU/memory/time resource quotas |
 | `apps/desktop` | Pure-Rust Windows 11 GUI manager (`egui` / `slint`) for pairing, panels, security, and extensions |

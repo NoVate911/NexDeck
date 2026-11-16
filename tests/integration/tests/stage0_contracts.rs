@@ -24,9 +24,10 @@ fn universal_api_approval_and_notification_flow_through_core() {
             ApiPermission::SendNotification,
         ],
     );
+    let req_id = format!("req-2026-{}", 1);
 
     let payload = ApprovalRequestPayload {
-        nonce: "req-2026-0001".to_owned(),
+        request_id: req_id.clone(),
         application: "MyApplication".to_owned(),
         title: "Confirm Action".to_owned(),
         description: "Allow execution of the requested operation?".to_owned(),
@@ -40,14 +41,12 @@ fn universal_api_approval_and_notification_flow_through_core() {
 
     let resolved = agent
         .approvals_mut()
-        .resolve("req-2026-0001", "approve", 1_010_000)
+        .resolve(&req_id, "approve", 1_010_000)
         .expect("timely allowed decision should resolve");
     assert_eq!(resolved.status, ApprovalStatus::Resolved("approve".into()));
 
     assert_eq!(
-        agent
-            .approvals_mut()
-            .resolve("req-2026-0001", "approve", 1_015_000),
+        agent.approvals_mut().resolve(&req_id, "approve", 1_015_000),
         Err(ApprovalError::AlreadyFinalized)
     );
 

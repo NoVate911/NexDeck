@@ -76,8 +76,8 @@ impl ClientPolicy {
 /// Universal API payload for creating a remote approval request (`TZ.md` §7.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApprovalRequestPayload {
-    /// Single-use unique nonce protecting against replay attacks.
-    pub nonce: String,
+    /// Single-use unique request ID protecting against replay attacks.
+    pub request_id: String,
     /// Source application name.
     pub application: String,
     /// Prompt heading.
@@ -129,7 +129,7 @@ impl From<ApprovalError> for ApiError {
 /// # Errors
 ///
 /// Fails if the client is revoked, lacks [`ApiPermission::RequestApproval`],
-/// submits an invalid timeout, or collides with an existing nonce.
+/// submits an invalid timeout, or collides with an existing single-use ID.
 pub fn submit_approval_request(
     client: &ClientPolicy,
     registry: &mut ApprovalRegistry,
@@ -144,7 +144,7 @@ pub fn submit_approval_request(
     }
     let expires_at_epoch_ms = now_epoch_ms.saturating_add(payload.timeout_secs * 1_000);
     let request = ApprovalRequest {
-        nonce: payload.nonce,
+        request_id: payload.request_id,
         application: payload.application,
         title: payload.title,
         description: payload.description,
@@ -189,13 +189,17 @@ pub fn build_notification_event(
 mod tests {
     use super::*;
 
+    fn test_id(seq: u64) -> String {
+        format!("api-req-{seq}")
+    }
+
     #[test]
     fn unauthorized_or_revoked_client_is_blocked() {
         let mut reg = ApprovalRegistry::new();
         let mut policy = ClientPolicy::new("app-1", "MyApp", [ApiPermission::ReadMetrics]);
 
         let payload = ApprovalRequestPayload {
-            nonce: "n1".to_owned(),
+            request_id: test_id(1),
             application: "MyApp".to_owned(),
             title: "Confirm".to_owned(),
             description: "Proceed?".to_owned(),
@@ -221,9 +225,10 @@ mod tests {
     fn valid_approval_payload_is_registered() {
         let mut reg = ApprovalRegistry::new();
         let policy = ClientPolicy::new("app-2", "MyApp", [ApiPermission::RequestApproval]);
+        let req_id = test_id(2);
 
         let payload = ApprovalRequestPayload {
-            nonce: "n2".to_owned(),
+            request_id: req_id.clone(),
             application: "MyApp".to_owned(),
             title: "Confirm".to_owned(),
             description: "Allow execution?".to_owned(),
@@ -236,7 +241,7 @@ mod tests {
             submit_approval_request(&policy, &mut reg, payload, 10_000),
             Ok(())
         );
-        let stored = reg.get("n2");
+        let stored = reg.get(&req_id);
         assert_eq!(stored.map(|r| r.expires_at_epoch_ms), Some(70_000));
     }
 }

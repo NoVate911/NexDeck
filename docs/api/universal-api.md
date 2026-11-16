@@ -40,11 +40,11 @@ sequenceDiagram
     participant Phone as Mobile Client
 
     App->>API: Authenticated approval_request (timeout, actions)
-    API->>Approval: Register request with single-use nonce & expiry
+    API->>Approval: Register request with single-use request_id & expiry
     Approval->>Core: Dispatch prompt
     Core->>Phone: Push prompt over active transport
     Phone-->>Core: User selects approve / deny
-    Core-->>Approval: Submit decision + nonce
+    Core-->>Approval: Submit decision + request_id
     Approval-->>API: Verified one-time result
     API-->>App: Return decision
 ```
@@ -55,6 +55,6 @@ sequenceDiagram
 
 - Every client must register a unique `ClientIdentity` and authenticate using a revocable token.
 - Permissions are deny-by-default (`ReadMetrics`, `SendNotification`, `RequestApproval`, `ReadPlugins`, `ExecuteAllowedAction`).
-- Every approval request is bound to a single-use `nonce`, originating `application`, allowed action list, and bounded `timeout_secs` (`1..=3600`).
-- Replayed nonces or expired requests are unconditionally rejected.
+- Every approval request is bound to a single-use `request_id`, originating `application`, allowed action list, and bounded `timeout_secs` (`1..=3600`).
+- Replayed `request_id` values or expired requests are unconditionally rejected.
 - Third-party applications never receive unrestricted OS or UAC privileges.

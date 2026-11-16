@@ -1,7 +1,7 @@
 //! Remote Approval subsystem state machine for NexDeck.
 //!
-//! Enforces single-use request identifiers (nonces), application binding,
-//! allowed action verification, and finite expiration timeouts (`TZ.md` §7.2, §8).
+//! Enforces single-use request identifiers, application binding, allowed action
+//! verification, and finite expiration timeouts (`TZ.md` §7.2, §8).
 //! Mobile approvals explicitly do not replace Windows User Account Control (UAC).
 
 use std::collections::HashMap;
@@ -37,7 +37,7 @@ pub enum ApprovalStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApprovalRequest {
     /// Single-use unique identifier preventing replay attacks.
-    pub nonce: String,
+    pub request_id: String,
     /// Identifier of the originating application.
     pub application: String,
     /// Short prompt title.
@@ -57,10 +57,10 @@ pub struct ApprovalRequest {
 /// Errors produced when registering or resolving remote approvals.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApprovalError {
-    /// A request with this nonce has already been registered (replay attempt).
-    DuplicateNonce(String),
-    /// No registered request matches the provided nonce.
-    UnknownNonce(String),
+    /// A request with this single-use ID has already been registered (replay attempt).
+    DuplicateRequestId(String),
+    /// No registered request matches the provided ID.
+    UnknownRequestId(String),
     /// Request metadata failed validation.
     InvalidRequest(&'static str),
     /// Decision submitted after `expires_at_epoch_ms`.
@@ -74,8 +74,8 @@ pub enum ApprovalError {
 impl fmt::Display for ApprovalError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::DuplicateNonce(n) => write!(f, "duplicate approval nonce: {n}"),
-            Self::UnknownNonce(n) => write!(f, "unknown approval nonce: {n}"),
+            Self::DuplicateRequestId(id) => write!(f, "duplicate approval request_id: {id}"),
+            Self::UnknownRequestId(id) => write!(f, "unknown approval request_id: {id}"),
             Self::InvalidRequest(msg) => write!(f, "invalid approval request: {msg}"),
             Self::RequestExpired => write!(f, "approval request has expired"),
             Self::AlreadyFinalized => write!(f, "approval request is already finalized"),
@@ -99,15 +99,17 @@ impl ApprovalRegistry {
         Self::default()
     }
 
-    /// Registers a new [`ApprovalRequest`] after validating invariants and nonce uniqueness.
+    /// Registers a new [`ApprovalRequest`] after validating invariants and ID uniqueness.
     ///
     /// # Errors
     ///
     /// Returns [`ApprovalError::InvalidRequest`] if required fields are empty or
-    /// [`ApprovalError::DuplicateNonce`] if the nonce already exists.
+    /// [`ApprovalError::DuplicateRequestId`] if the ID already exists.
     pub fn register(&mut self, mut request: ApprovalRequest) -> Result<(), ApprovalError> {
-        if request.nonce.trim().is_empty() {
-            return Err(ApprovalError::InvalidRequest("nonce must not be empty"));
+        if request.request_id.trim().is_empty() {
+            return Err(ApprovalError::InvalidRequest(
+                "request_id must not be empty",
+            ));
         }
         if request.application.trim().is_empty() {
             return Err(ApprovalError::InvalidRequest(
@@ -122,11 +124,11 @@ impl ApprovalRegistry {
                 "allowed_actions must contain at least one action",
             ));
         }
-        if self.requests.contains_key(&request.nonce) {
-            return Err(ApprovalError::DuplicateNonce(request.nonce));
+        if self.requests.contains_key(&request.request_id) {
+            return Err(ApprovalError::DuplicateRequestId(request.request_id));
         }
         request.status = ApprovalStatus::Pending;
-        self.requests.insert(request.nonce.clone(), request);
+        self.requests.insert(request.request_id.clone(), request);
         Ok(())
     }
 
@@ -134,18 +136,18 @@ impl ApprovalRegistry {
     ///
     /// # Errors
     ///
-    /// Rejects unknown nonces, expired requests, repeated decisions (replay),
+    /// Rejects unknown IDs, expired requests, repeated decisions (replay),
     /// or actions outside `allowed_actions`.
     pub fn resolve(
         &mut self,
-        nonce: &str,
+        request_id: &str,
         action: &str,
         now_epoch_ms: u64,
     ) -> Result<&ApprovalRequest, ApprovalError> {
         let req = self
             .requests
-            .get_mut(nonce)
-            .ok_or_else(|| ApprovalError::UnknownNonce(nonce.to_owned()))?;
+            .get_mut(request_id)
+            .ok_or_else(|| ApprovalError::UnknownRequestId(request_id.to_owned()))?;
 
         if req.status != ApprovalStatus::Pending {
             return Err(ApprovalError::AlreadyFinalized);
@@ -168,12 +170,12 @@ impl ApprovalRegistry {
     ///
     /// # Errors
     ///
-    /// Returns [`ApprovalError::UnknownNonce`] or [`ApprovalError::AlreadyFinalized`].
-    pub fn revoke(&mut self, nonce: &str) -> Result<(), ApprovalError> {
+    /// Returns [`ApprovalError::UnknownRequestId`] or [`ApprovalError::AlreadyFinalized`].
+    pub fn revoke(&mut self, request_id: &str) -> Result<(), ApprovalError> {
         let req = self
             .requests
-            .get_mut(nonce)
-            .ok_or_else(|| ApprovalError::UnknownNonce(nonce.to_owned()))?;
+            .get_mut(request_id)
+            .ok_or_else(|| ApprovalError::UnknownRequestId(request_id.to_owned()))?;
 
         if req.status != ApprovalStatus::Pending {
             return Err(ApprovalError::AlreadyFinalized);
@@ -183,10 +185,10 @@ impl ApprovalRegistry {
         Ok(())
     }
 
-    /// Retrieves a stored approval request by nonce for audit inspection.
+    /// Retrieves a stored approval request by single-use ID for audit inspection.
     #[must_use]
-    pub fn get(&self, nonce: &str) -> Option<&ApprovalRequest> {
-        self.requests.get(nonce)
+    pub fn get(&self, request_id: &str) -> Option<&ApprovalRequest> {
+        self.requests.get(request_id)
     }
 }
 
@@ -194,9 +196,13 @@ impl ApprovalRegistry {
 mod tests {
     use super::*;
 
-    fn sample_request(nonce: &str, expires_at_epoch_ms: u64) -> ApprovalRequest {
+    fn test_id(seq: u64) -> String {
+        format!("req-{seq}")
+    }
+
+    fn sample_request(request_id: String, expires_at_epoch_ms: u64) -> ApprovalRequest {
         ApprovalRequest {
-            nonce: nonce.to_owned(),
+            request_id,
             application: "MyApplication".to_owned(),
             title: "Confirm Action".to_owned(),
             description: "Allow execution?".to_owned(),
@@ -210,43 +216,47 @@ mod tests {
     #[test]
     fn resolves_valid_request_once_and_blocks_replay() {
         let mut reg = ApprovalRegistry::new();
-        assert_eq!(reg.register(sample_request("nonce-1", 2_000)), Ok(()));
+        let id = test_id(1);
+        assert_eq!(reg.register(sample_request(id.clone(), 2_000)), Ok(()));
 
-        let resolved = reg.resolve("nonce-1", "approve", 1_500);
+        let resolved = reg.resolve(&id, "approve", 1_500);
         assert!(resolved.is_ok());
         assert_eq!(
-            reg.get("nonce-1").map(|r| &r.status),
+            reg.get(&id).map(|r| &r.status),
             Some(&ApprovalStatus::Resolved("approve".to_owned()))
         );
 
         assert_eq!(
-            reg.resolve("nonce-1", "deny", 1_600),
+            reg.resolve(&id, "deny", 1_600),
             Err(ApprovalError::AlreadyFinalized)
         );
     }
 
     #[test]
-    fn rejects_duplicate_nonce_registration() {
+    fn rejects_duplicate_request_id_registration() {
         let mut reg = ApprovalRegistry::new();
-        assert_eq!(reg.register(sample_request("nonce-dup", 2_000)), Ok(()));
+        let id = test_id(2);
+        assert_eq!(reg.register(sample_request(id.clone(), 2_000)), Ok(()));
         assert_eq!(
-            reg.register(sample_request("nonce-dup", 3_000)),
-            Err(ApprovalError::DuplicateNonce("nonce-dup".to_owned()))
+            reg.register(sample_request(id.clone(), 3_000)),
+            Err(ApprovalError::DuplicateRequestId(id))
         );
     }
 
     #[test]
     fn rejects_expired_and_disallowed_actions() {
         let mut reg = ApprovalRegistry::new();
-        assert_eq!(reg.register(sample_request("nonce-exp", 1_000)), Ok(()));
+        let exp_id = test_id(3);
+        assert_eq!(reg.register(sample_request(exp_id.clone(), 1_000)), Ok(()));
         assert_eq!(
-            reg.resolve("nonce-exp", "approve", 1_001),
+            reg.resolve(&exp_id, "approve", 1_001),
             Err(ApprovalError::RequestExpired)
         );
 
-        assert_eq!(reg.register(sample_request("nonce-act", 5_000)), Ok(()));
+        let act_id = test_id(4);
+        assert_eq!(reg.register(sample_request(act_id.clone(), 5_000)), Ok(()));
         assert_eq!(
-            reg.resolve("nonce-act", "escalate", 2_000),
+            reg.resolve(&act_id, "escalate", 2_000),
             Err(ApprovalError::DisallowedAction("escalate".to_owned()))
         );
     }

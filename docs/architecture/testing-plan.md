@@ -21,7 +21,7 @@ Every feature and bug fix in NexDeck must be backed by automated, reproducible v
 ## 2. Critical Test Scenarios by Subsystem
 
 - **Remote Approval (`crates/approval`):**
-  - Reject duplicate/replayed one-time nonces.
+  - Reject duplicate/replayed one-time `request_id` values.
   - Reject decisions after `expires_at_epoch_ms` timeout.
   - Reject actions not declared in the request's `allowed_actions`.
   - Verify strict isolation from Windows UAC elevation flows.
