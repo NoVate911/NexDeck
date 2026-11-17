@@ -1659,11 +1659,15 @@ dependencies = [
 [[package]]
 name = "nexdeck-approval"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "nexdeck-core"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "nexdeck-api",
  "nexdeck-approval",
  "nexdeck-monitoring",
@@ -1673,6 +1677,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tower",
  "windows-sys 0.61.2",
 ]
 
@@ -1713,6 +1718,9 @@ dependencies = [
 [[package]]
 name = "nexdeck-notifications"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "nexdeck-plugin-engine"
