@@ -1,6 +1,6 @@
 [package]
 name = "nexdeck-desktop"
-description = "Pure-Rust Desktop Manager GUI shell for NexDeck (Stage 0 skeleton)"
+description = "Pure-Rust Desktop Manager GUI shell for NexDeck"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,11 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+eframe.workspace = true
 nexdeck-api.workspace = true
+nexdeck-core.workspace = true
+nexdeck-transport.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true
