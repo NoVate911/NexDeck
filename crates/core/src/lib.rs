@@ -4,6 +4,7 @@
 //! [`nexdeck_notifications`], [`nexdeck_approval`], [`nexdeck_api`], and
 //! [`nexdeck_plugin_engine`] with zero heavy UI dependencies.
 
+pub mod api_routes;
 pub mod autostart;
 pub mod control;
 pub mod process_metrics;

@@ -6,12 +6,12 @@
 
 ## Текущее состояние
 
-- **Актуальный этап:** Этап 3 (Widget Engine и Desktop Manager) **завершён** — выполнен **PR 3.3 (`apps/mobile` динамический Widget Engine и редактор панелей, Issue #26)**; следующим начинается **Этап 4 (Universal API)**.
+- **Актуальный этап:** Этап 4 (Universal API) — выполнен **PR 4.1 (серверная часть Universal API `/api/v1/*`, `clients.json`, `ADR-0007`, CLI и Desktop Manager, Issue #30)**; следующим выполняется **PR 4.2 (клиентские SDK `sdk/python`, `sdk/js`, примеры `examples/` и документация `docs/api/`)**.
 - **Версия workspace:** `0.1.0` (Rust Edition 2024, `rust-version = "1.88"`; Flutter `3.50.0` / Dart `3.14.0` в `apps/mobile`).
-- **Последний выполненный шаг:** исправлено определение каталога данных в `apps/mobile` для реальных Android-устройств (нативный `filesDir` через `MethodChannel` в `MainActivity.kt` и общий `AppJsonFile` в `app_data_dir.dart` без новых `pub`-зависимостей); ранее выполнен динамический Widget Engine (Этап 3 в [`stage-3.md`](docs/journal/archive/stage-3.md)).
+- **Последний выполненный шаг:** реализованы протокол и реестр сторонних клиентов (`crates/api::clients::ClientRegistry` с SHA-256 хешами токенов в `clients.json` и проверкой scopes `ApiPermission`), маршруты `/api/v1/status`, `/api/v1/metrics`, `/api/v1/notifications`, `/api/v1/approvals/*`, `/api/v1/control` и `/api/v1/ws` в `crates/core::api_routes` поверх `axum` ([ADR-0007](docs/architecture/adr/0007-universal-api-http-ws-axum.md)), CLI-флаги `--register-client` / `--list-clients` / `--revoke-client` в `nexdeck-agent` и управление клиентами в `apps/desktop`.
 - **Фактические показатели `nexdeck-agent.exe` (release, LTO + strip):** размер `1 743 360` байт (`~1.66 MiB`); `--measure-ram` — `private=1.23 MiB`, `working_set=6.44 MiB`. `nexdeck-desktop.exe` — `3 614 720` байт.
 - **Согласованные решения:**
-  - Сеть и сервер: `tokio` (`current_thread`) + `axum` + `rustls` WSS с пиннингом SHA-256 отпечатка и PIN/QR-pairing ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)).
+  - Сеть и сервер: `tokio` (`current_thread`) + `axum` + `rustls` WSS с пиннингом SHA-256 отпечатка и PIN/QR-pairing ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)), Universal API `/api/v1/*` поверх `axum` ([ADR-0007](docs/architecture/adr/0007-universal-api-http-ws-axum.md)).
   - Мониторинг Windows 11: Win32/PDH поверх `windows-sys` (`crates/monitoring`, [ADR-0006](docs/architecture/adr/0006-monitoring-win32-pdh.md)).
   - UI/клиенты/плагины: `egui / eframe` ([ADR-0002](docs/architecture/adr/0002-desktop-ui-pure-rust.md)), Flutter ([ADR-0003](docs/architecture/adr/0003-mobile-client-flutter.md)), WebAssembly ([ADR-0004](docs/architecture/adr/0004-plugin-engine-wasm.md)).
 
@@ -19,7 +19,7 @@
 
 ## Что делать следующим (Этап 4 — Universal API)
 
-1. **Этап 4 (`crates/api`, `crates/core`, `sdk/`, `examples/`):** реализовать локальный IPC / авторизованный локальный HTTP/WebSocket API на `127.0.0.1` (`axum`), регистрацию сторонних приложений, выдачу и отзыв токенов с ограниченными правами (`ClientPolicy` / scopes), клиентские SDK и синтетические примеры (`ExampleApp`, `org.example.*`).
+1. **PR 4.2 (`sdk/python`, `sdk/js`, `examples/`, `docs/api/`):** реализовать легковесные клиентские SDK без внешних зависимостей для Python и JavaScript/TypeScript, синтетические примеры интеграции (`ExampleApp`, `org.example.*`) и полную документацию по Universal API.
 2. **Этап 5 (`crates/notifications`, `crates/approval`):** сквозной центр уведомлений с буфером сна и поток Remote Approval (`approval_request` от стороннего приложения -> экран телефона -> возврат решения без обхода UAC).
 
 ---

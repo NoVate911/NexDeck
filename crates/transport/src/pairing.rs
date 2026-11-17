@@ -253,7 +253,9 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
     out
 }
 
-fn constant_time_eq(a: &str, b: &str) -> bool {
+/// Compares two ASCII strings in constant time when their lengths match.
+#[must_use]
+pub fn constant_time_eq(a: &str, b: &str) -> bool {
     let a_bytes = a.as_bytes();
     let b_bytes = b.as_bytes();
     if a_bytes.len() != b_bytes.len() {
@@ -281,12 +283,21 @@ fn generate_pairing_pin() -> Result<String, TransportError> {
     }
 }
 
-fn generate_device_token() -> Result<String, TransportError> {
+/// Generates a 256-bit (64 hex chars) cryptographically random bearer secret.
+///
+/// # Errors
+///
+/// Returns [`TransportError::ChannelFailure`] if the OS CSPRNG fails.
+pub fn generate_random_secret_hex() -> Result<String, TransportError> {
     let rng = SystemRandom::new();
     let mut buf = [0u8; 32];
     rng.fill(&mut buf)
         .map_err(|_| TransportError::ChannelFailure("CSPRNG failure".to_owned()))?;
     Ok(bytes_to_hex(&buf))
+}
+
+fn generate_device_token() -> Result<String, TransportError> {
+    generate_random_secret_hex()
 }
 
 #[cfg(test)]

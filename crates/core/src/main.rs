@@ -3,7 +3,10 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use nexdeck_api::ApiPermission;
+use nexdeck_api::clients::ClientRegistry;
 use nexdeck_monitoring::default_collector;
 use nexdeck_transport::PROTOCOL_VERSION;
 
@@ -33,6 +36,19 @@ enum CliCommand {
     },
     UninstallAutostart,
     AutostartStatus,
+    RegisterClient {
+        config_dir: Option<PathBuf>,
+        client_id: String,
+        app_name: String,
+        permissions: Vec<ApiPermission>,
+    },
+    ListClients {
+        config_dir: Option<PathBuf>,
+    },
+    RevokeClient {
+        config_dir: Option<PathBuf>,
+        client_id: String,
+    },
     MeasureRam,
     Summary,
 }
@@ -68,6 +84,9 @@ fn parse_args(args: &[String]) -> Result<CliCommand, String> {
         "--measure-ram" if args.len() == 1 => Ok(CliCommand::MeasureRam),
         "--check-config" => parse_check_config(&args[1..]),
         "--install-autostart" => parse_install_autostart(&args[1..]),
+        "--register-client" => parse_register_client(&args[1..]),
+        "--list-clients" => parse_list_clients(&args[1..]),
+        "--revoke-client" => parse_revoke_client(&args[1..]),
         "--daemon" => parse_daemon(&args[1..]),
         "--pair" => Err(
             "Standalone --pair requires --daemon (local IPC pairing lands in Stage 3).\n\
@@ -92,6 +111,97 @@ fn parse_check_config(rest: &[String]) -> Result<CliCommand, String> {
         i += 1;
     }
     Ok(CliCommand::CheckConfig { config_dir })
+}
+
+fn parse_register_client(rest: &[String]) -> Result<CliCommand, String> {
+    let mut config_dir = None;
+    let mut client_id = None;
+    let mut app_name = None;
+    let mut permissions = vec![
+        ApiPermission::ReadMetrics,
+        ApiPermission::SendNotification,
+        ApiPermission::RequestApproval,
+    ];
+    let mut i = 0;
+    while i < rest.len() {
+        match rest[i].as_str() {
+            "--config-dir" => {
+                let value = next_flag_value(rest, &mut i, "--config-dir")?;
+                config_dir = Some(PathBuf::from(value));
+            }
+            "--id" => {
+                let value = next_flag_value(rest, &mut i, "--id")?;
+                client_id = Some(value.to_owned());
+            }
+            "--name" => {
+                let value = next_flag_value(rest, &mut i, "--name")?;
+                app_name = Some(value.to_owned());
+            }
+            "--permissions" => {
+                let raw = next_flag_value(rest, &mut i, "--permissions")?;
+                let mut parsed = Vec::new();
+                for token in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                    let perm = ApiPermission::parse_name(token)
+                        .ok_or_else(|| format!("Unknown permission '{token}'"))?;
+                    parsed.push(perm);
+                }
+                permissions = parsed;
+            }
+            other => {
+                return Err(format!(
+                    "Unexpected argument for --register-client: {other}"
+                ));
+            }
+        }
+        i += 1;
+    }
+
+    Ok(CliCommand::RegisterClient {
+        config_dir,
+        client_id: client_id.ok_or_else(|| "Missing required --id <client_id>".to_owned())?,
+        app_name: app_name.ok_or_else(|| "Missing required --name <app_name>".to_owned())?,
+        permissions,
+    })
+}
+
+fn parse_list_clients(rest: &[String]) -> Result<CliCommand, String> {
+    let mut config_dir = None;
+    let mut i = 0;
+    while i < rest.len() {
+        match rest[i].as_str() {
+            "--config-dir" => {
+                let value = next_flag_value(rest, &mut i, "--config-dir")?;
+                config_dir = Some(PathBuf::from(value));
+            }
+            other => return Err(format!("Unexpected argument for --list-clients: {other}")),
+        }
+        i += 1;
+    }
+    Ok(CliCommand::ListClients { config_dir })
+}
+
+fn parse_revoke_client(rest: &[String]) -> Result<CliCommand, String> {
+    let mut config_dir = None;
+    let mut client_id = None;
+    let mut i = 0;
+    while i < rest.len() {
+        match rest[i].as_str() {
+            "--config-dir" => {
+                let value = next_flag_value(rest, &mut i, "--config-dir")?;
+                config_dir = Some(PathBuf::from(value));
+            }
+            other if !other.starts_with("--") && client_id.is_none() => {
+                client_id = Some(other.to_owned());
+            }
+            other => return Err(format!("Unexpected argument for --revoke-client: {other}")),
+        }
+        i += 1;
+    }
+    Ok(CliCommand::RevokeClient {
+        config_dir,
+        client_id: client_id
+            .ok_or_else(|| "Missing <client_id> after --revoke-client".to_owned())?,
+    })
 }
 
 fn parse_install_autostart(rest: &[String]) -> Result<CliCommand, String> {
@@ -224,6 +334,17 @@ fn execute(cmd: CliCommand) -> Result<(), String> {
             }
             Ok(())
         }
+        CliCommand::RegisterClient {
+            config_dir,
+            client_id,
+            app_name,
+            permissions,
+        } => run_register_client(config_dir.as_deref(), client_id, app_name, permissions),
+        CliCommand::ListClients { config_dir } => run_list_clients(config_dir.as_deref()),
+        CliCommand::RevokeClient {
+            config_dir,
+            client_id,
+        } => run_revoke_client(config_dir.as_deref(), &client_id),
         CliCommand::MeasureRam => run_measure_ram(),
     }
 }
@@ -235,11 +356,60 @@ fn print_help() {
         "  nexdeck-agent --daemon [--bind <ip:port>] [--config-dir <dir>] [--pair] [--ttl <secs>]"
     );
     println!("  nexdeck-agent --check-config [--config-dir <dir>]");
+    println!(
+        "  nexdeck-agent --register-client --id <id> --name <name> [--permissions <csv>] [--config-dir <dir>]"
+    );
+    println!("  nexdeck-agent --list-clients [--config-dir <dir>]");
+    println!("  nexdeck-agent --revoke-client <id> [--config-dir <dir>]");
     println!("  nexdeck-agent --install-autostart [--bind <ip:port>]");
     println!("  nexdeck-agent --uninstall-autostart");
     println!("  nexdeck-agent --autostart-status");
     println!("  nexdeck-agent --measure-ram");
     println!("  nexdeck-agent --version | --help");
+}
+
+fn run_register_client(
+    config_dir: Option<&std::path::Path>,
+    client_id: String,
+    app_name: String,
+    permissions: Vec<ApiPermission>,
+) -> Result<(), String> {
+    let paths = StoragePaths::resolve(config_dir).map_err(|err| err.to_string())?;
+    let existing = paths.load_clients().map_err(|err| err.to_string())?;
+    let mut reg = ClientRegistry::from_records(existing);
+    let now_epoch_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+    let creds = reg
+        .register_client(client_id, app_name, permissions, now_epoch_ms)
+        .map_err(|err| err.to_string())?;
+    paths
+        .save_clients(&reg.export_records())
+        .map_err(|err| err.to_string())?;
+    let json = serde_json::to_string_pretty(&creds).map_err(|err| err.to_string())?;
+    println!("{json}");
+    Ok(())
+}
+
+fn run_list_clients(config_dir: Option<&std::path::Path>) -> Result<(), String> {
+    let paths = StoragePaths::resolve(config_dir).map_err(|err| err.to_string())?;
+    let clients = paths.load_clients().map_err(|err| err.to_string())?;
+    let json = serde_json::to_string_pretty(&clients).map_err(|err| err.to_string())?;
+    println!("{json}");
+    Ok(())
+}
+
+fn run_revoke_client(config_dir: Option<&std::path::Path>, client_id: &str) -> Result<(), String> {
+    let paths = StoragePaths::resolve(config_dir).map_err(|err| err.to_string())?;
+    let existing = paths.load_clients().map_err(|err| err.to_string())?;
+    let mut reg = ClientRegistry::from_records(existing);
+    reg.set_revoked(client_id, true)
+        .map_err(|err| err.to_string())?;
+    paths
+        .save_clients(&reg.export_records())
+        .map_err(|err| err.to_string())?;
+    println!("Revoked API client '{client_id}'.");
+    Ok(())
 }
 
 fn run_check_config(config_dir: Option<&std::path::Path>) -> Result<(), String> {

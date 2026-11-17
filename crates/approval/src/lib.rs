@@ -7,12 +7,15 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 /// Risk classification surfaced on the mobile confirmation prompt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum RiskLevel {
     /// Routine non-destructive operation.
     Low,
     /// Operation modifies state or user configuration.
+    #[default]
     Medium,
     /// Sensitive operation (e.g., process termination, privileged script).
     High,
@@ -21,7 +24,8 @@ pub enum RiskLevel {
 }
 
 /// Current lifecycle status of a remote approval request.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", content = "selected_action")]
 pub enum ApprovalStatus {
     /// Waiting for user input prior to expiration.
     Pending,
@@ -34,7 +38,7 @@ pub enum ApprovalStatus {
 }
 
 /// Registered approval request stored until resolved or archived.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApprovalRequest {
     /// Single-use unique identifier preventing replay attacks.
     pub request_id: String,
@@ -189,6 +193,14 @@ impl ApprovalRegistry {
     #[must_use]
     pub fn get(&self, request_id: &str) -> Option<&ApprovalRequest> {
         self.requests.get(request_id)
+    }
+
+    /// Returns all stored approval requests ordered deterministically by `request_id`.
+    #[must_use]
+    pub fn list_all(&self) -> Vec<ApprovalRequest> {
+        let mut items: Vec<ApprovalRequest> = self.requests.values().cloned().collect();
+        items.sort_by(|left, right| left.request_id.cmp(&right.request_id));
+        items
     }
 }
 

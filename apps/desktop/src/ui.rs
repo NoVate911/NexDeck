@@ -8,6 +8,7 @@ use eframe::egui::{
     self, Align2, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Pos2, Rect,
     RichText, ScrollArea, Sense, Stroke, StrokeKind, Vec2,
 };
+use nexdeck_api::ApiPermission;
 use nexdeck_api::panels::{
     MAX_PANEL_COLUMNS, MAX_REFRESH_INTERVAL_MS, MIN_PANEL_COLUMNS, MIN_REFRESH_INTERVAL_MS,
     WidgetKind, WidgetSpec, WidgetStyle,
@@ -172,7 +173,7 @@ impl NexDeckDesktopApp {
             ui.selectable_value(
                 &mut self.state.active_tab,
                 DesktopTab::DevicesAndTls,
-                "Устройства и TLS",
+                "Устройства, API и TLS",
             );
 
             ui.separator();
@@ -959,48 +960,157 @@ impl NexDeckDesktopApp {
 
             if self.state.devices.is_empty() {
                 ui.label("Сопряжённых устройств пока нет. Запустите агента в режиме --pair.");
+            } else {
+                let mut revoke_target: Option<String> = None;
+                ScrollArea::vertical()
+                    .id_salt("devices_scroll")
+                    .max_height(180.0)
+                    .show(ui, |ui| {
+                        for record in &self.state.devices {
+                            ui.group(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            RichText::new(format!(
+                                                "{} ({})",
+                                                record.device_name, record.device_id
+                                            ))
+                                            .strong(),
+                                        );
+                                        ui.label(
+                                            RichText::new(format!(
+                                                "Epoch ms: {} • Hash: {}…",
+                                                record.paired_at_epoch_ms,
+                                                &record.token_hash_sha256
+                                                    [..record.token_hash_sha256.len().min(16)]
+                                            ))
+                                            .small()
+                                            .weak(),
+                                        );
+                                    });
+                                    if ui
+                                        .button(RichText::new("Отозвать доступ").color(STATUS_ERR))
+                                        .clicked()
+                                    {
+                                        revoke_target = Some(record.device_id.clone());
+                                    }
+                                });
+                            });
+                        }
+                    });
+
+                if let Some(id) = revoke_target {
+                    self.state.revoke_device(&id);
+                }
+            }
+        });
+
+        ui.add_space(10.0);
+        self.draw_api_clients_section(ui, ctx);
+    }
+
+    fn draw_api_clients_section(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.group(|ui| {
+            ui.heading(format!(
+                "Universal API клиенты ({}, clients.json)",
+                self.state.api_clients.len()
+            ));
+            ui.horizontal(|ui| {
+                ui.label("Client ID:");
+                ui.text_edit_singleline(&mut self.state.new_api_client_id);
+                ui.label("Имя приложения:");
+                ui.text_edit_singleline(&mut self.state.new_api_client_name);
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Разрешения:");
+                for (idx, perm) in ApiPermission::ALL.iter().copied().enumerate() {
+                    ui.checkbox(&mut self.state.new_api_client_permissions[idx], perm.as_str());
+                }
+                if ui.button("+ Зарегистрировать клиент").clicked() {
+                    self.state.register_api_client();
+                }
+            });
+
+            if let Some(issued) = self.state.latest_issued_api_client.clone() {
+                ui.separator();
+                ui.label(
+                    RichText::new(format!(
+                        "Одноразовый токен для '{}' (сохраните сейчас — на диске хранится только SHA-256 хэш):",
+                        issued.client_id
+                    ))
+                    .color(ACCENT_CYAN)
+                    .strong(),
+                );
+                ui.monospace(&issued.access_secret);
+                ui.horizontal(|ui| {
+                    if ui.button("Скопировать токен").clicked() {
+                        ctx.copy_text(issued.access_secret.clone());
+                    }
+                    if ui.button("Скрыть").clicked() {
+                        self.state.latest_issued_api_client = None;
+                    }
+                });
+            }
+
+            ui.separator();
+            if self.state.api_clients.is_empty() {
+                ui.label("Зарегистрированных внешних приложений пока нет.");
                 return;
             }
 
-            let mut revoke_target: Option<String> = None;
+            let mut toggle_revoke: Option<(String, bool)> = None;
+            let mut delete_target: Option<String> = None;
             ScrollArea::vertical()
-                .id_salt("devices_scroll")
+                .id_salt("api_clients_scroll")
+                .max_height(200.0)
                 .show(ui, |ui| {
-                    for record in &self.state.devices {
+                    for client in &self.state.api_clients {
                         ui.group(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.vertical(|ui| {
-                                    ui.label(
-                                        RichText::new(format!(
-                                            "{} ({})",
-                                            record.device_name, record.device_id
-                                        ))
-                                        .strong(),
-                                    );
-                                    ui.label(
-                                        RichText::new(format!(
-                                            "Epoch ms: {} • Hash: {}…",
-                                            record.paired_at_epoch_ms,
-                                            &record.token_hash_sha256
-                                                [..record.token_hash_sha256.len().min(16)]
-                                        ))
-                                        .small()
-                                        .weak(),
-                                    );
-                                });
-                                if ui
-                                    .button(RichText::new("Отозвать доступ").color(STATUS_ERR))
+                            ui.horizontal_wrapped(|ui| {
+                                let status_color = if client.revoked { STATUS_ERR } else { STATUS_OK };
+                                let perms_text = client
+                                    .permissions
+                                    .iter()
+                                    .map(|p| p.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} [{}] ({})",
+                                        client.application_name,
+                                        client.client_id,
+                                        if client.revoked { "ОТОЗВАН" } else { "АКТИВЕН" }
+                                    ))
+                                    .color(status_color)
+                                    .strong(),
+                                );
+                                ui.label(RichText::new(format!("Права: [{perms_text}]")).small().weak());
+                                if client.revoked {
+                                    if ui.button("Восстановить").clicked() {
+                                        toggle_revoke = Some((client.client_id.clone(), false));
+                                    }
+                                } else if ui
+                                    .button(RichText::new("Отозвать").color(STATUS_WARN))
                                     .clicked()
                                 {
-                                    revoke_target = Some(record.device_id.clone());
+                                    toggle_revoke = Some((client.client_id.clone(), true));
+                                }
+                                if ui
+                                    .button(RichText::new("Удалить").color(STATUS_ERR))
+                                    .clicked()
+                                {
+                                    delete_target = Some(client.client_id.clone());
                                 }
                             });
                         });
                     }
                 });
 
-            if let Some(id) = revoke_target {
-                self.state.revoke_device(&id);
+            if let Some((id, revoked)) = toggle_revoke {
+                self.state.set_api_client_revoked(&id, revoked);
+            }
+            if let Some(id) = delete_target {
+                self.state.delete_api_client(&id);
             }
         });
     }

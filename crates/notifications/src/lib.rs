@@ -6,12 +6,15 @@
 
 use std::collections::VecDeque;
 
+use serde::{Deserialize, Serialize};
+
 /// Priority classification for notifications.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub enum NotificationPriority {
     /// Informational low-urgency event.
     Low,
     /// Standard application or system notification.
+    #[default]
     Normal,
     /// Actionable warning (e.g., high disk utilization).
     High,
@@ -20,7 +23,8 @@ pub enum NotificationPriority {
 }
 
 /// Origin category for a notification event.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "name")]
 pub enum NotificationSource {
     /// Native Windows 11 system event.
     WindowsSystem,
@@ -33,7 +37,7 @@ pub enum NotificationSource {
 }
 
 /// Structured notification payload.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotificationEvent {
     /// Unique event identifier.
     pub id: u64,
@@ -50,7 +54,7 @@ pub struct NotificationEvent {
 }
 
 /// Filter criteria evaluated before surfacing notifications to clients.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotificationFilter {
     /// Minimum priority required to pass the filter.
     pub min_priority: NotificationPriority,
@@ -111,6 +115,12 @@ impl NotificationQueue {
     /// Drains all queued notifications in FIFO order (e.g., on wake/reconnect).
     pub fn drain_all(&mut self) -> Vec<NotificationEvent> {
         self.items.drain(..).collect()
+    }
+
+    /// Returns a non-destructive FIFO snapshot of currently buffered notifications.
+    #[must_use]
+    pub fn items(&self) -> Vec<NotificationEvent> {
+        self.items.iter().cloned().collect()
     }
 
     /// Returns the number of currently queued events.

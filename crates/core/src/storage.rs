@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use nexdeck_api::clients::ClientRecord;
 use nexdeck_api::panels::DeckConfig;
 use nexdeck_transport::TransportError;
 use nexdeck_transport::pairing::DeviceRecord;
@@ -18,6 +19,7 @@ use crate::{AgentConfig, CoreAgent};
 const DATA_DIR_NAME: &str = "NexDeck";
 const CONFIG_FILE_NAME: &str = "config.json";
 const DEVICES_FILE_NAME: &str = "devices.json";
+const CLIENTS_FILE_NAME: &str = "clients.json";
 const PANELS_FILE_NAME: &str = "panels.json";
 const TLS_CERT_FILE_NAME: &str = "host-cert.pem";
 const TLS_KEY_FILE_NAME: &str = "host-key.pem";
@@ -115,6 +117,12 @@ impl StoragePaths {
         self.root_dir.join(DEVICES_FILE_NAME)
     }
 
+    /// Returns the path to `clients.json`.
+    #[must_use]
+    pub fn clients_path(&self) -> PathBuf {
+        self.root_dir.join(CLIENTS_FILE_NAME)
+    }
+
     /// Returns the path to `panels.json`.
     #[must_use]
     pub fn panels_path(&self) -> PathBuf {
@@ -195,6 +203,34 @@ impl StoragePaths {
         sorted.sort_by(|left, right| left.device_id.cmp(&right.device_id));
         let json = serde_json::to_vec_pretty(&sorted)?;
         write_atomic(&self.devices_path(), &json, true)
+    }
+
+    /// Loads persisted Universal API [`ClientRecord`] entries from `clients.json` (empty if absent).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if reading or JSON decoding fails.
+    pub fn load_clients(&self) -> Result<Vec<ClientRecord>, StorageError> {
+        let path = self.clients_path();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let raw = fs::read_to_string(&path)?;
+        let mut records: Vec<ClientRecord> = serde_json::from_str(&raw)?;
+        records.sort_by(|left, right| left.client_id.cmp(&right.client_id));
+        Ok(records)
+    }
+
+    /// Atomically persists Universal API [`ClientRecord`] entries (token hashes only) to `clients.json`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if serialization or atomic file replacement fails.
+    pub fn save_clients(&self, clients: &[ClientRecord]) -> Result<(), StorageError> {
+        let mut sorted = clients.to_vec();
+        sorted.sort_by(|left, right| left.client_id.cmp(&right.client_id));
+        let json = serde_json::to_vec_pretty(&sorted)?;
+        write_atomic(&self.clients_path(), &json, true)
     }
 
     /// Loads `panels.json` or initializes it with [`DeckConfig::default_starter`] if absent.

@@ -165,10 +165,28 @@ pub async fn spawn_wss_server(
     registry: Arc<RwLock<DeviceRegistry>>,
     inbound_tx: mpsc::Sender<InboundFrame>,
 ) -> Result<WssServerHandle, TransportError> {
+    spawn_wss_server_with_routes(bind_addr, tls, registry, inbound_tx, None).await
+}
+
+/// Binds and spawns the TLS-secured Axum server on `bind_addr`, merging optional `extra_routes`.
+///
+/// # Errors
+///
+/// Returns [`TransportError::ChannelFailure`] if TLS configuration or socket binding fails.
+pub async fn spawn_wss_server_with_routes(
+    bind_addr: SocketAddr,
+    tls: &HostTlsIdentity,
+    registry: Arc<RwLock<DeviceRegistry>>,
+    inbound_tx: mpsc::Sender<InboundFrame>,
+    extra_routes: Option<Router>,
+) -> Result<WssServerHandle, TransportError> {
     let rustls_config = tls.to_rustls_config().await?;
     let state = ServerState::new(registry, tls.fingerprint_sha256.clone(), inbound_tx);
     let broadcast_tx = state.broadcast_tx.clone();
-    let app = build_router(state);
+    let mut app = build_router(state);
+    if let Some(extra) = extra_routes {
+        app = app.merge(extra);
+    }
 
     let handle: Handle<SocketAddr> = Handle::new();
     let server_handle = handle.clone();
@@ -263,7 +281,9 @@ async fn ws_handler(
         .into_response()
 }
 
-fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
+/// Extracts a `Bearer <value>` authorization credential from HTTP headers.
+#[must_use]
+pub fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
     let raw = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
     let trimmed = raw.trim();
     trimmed

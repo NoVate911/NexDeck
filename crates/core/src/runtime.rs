@@ -2,18 +2,22 @@
 
 use std::fmt;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use nexdeck_monitoring::MetricCollector;
+use nexdeck_api::clients::{ClientRecord, ClientRegistry};
+use nexdeck_approval::ApprovalRegistry;
+use nexdeck_monitoring::{MetricCollector, SystemSnapshot};
+use nexdeck_notifications::NotificationQueue;
 use nexdeck_transport::control::{ControlCommandRequest, ControlCommandResponse};
 use nexdeck_transport::pairing::{DeviceRecord, DeviceRegistry, PairingQrPayload};
-use nexdeck_transport::server::{InboundFrame, WssServerHandle, spawn_wss_server};
+use nexdeck_transport::server::{InboundFrame, WssServerHandle, spawn_wss_server_with_routes};
 use nexdeck_transport::tls::HostTlsIdentity;
 use nexdeck_transport::{Envelope, MessageKind, PROTOCOL_VERSION, TransportError};
 use tokio::sync::{RwLock, broadcast, mpsc, watch};
 use tokio::time::MissedTickBehavior;
 
+use crate::api_routes::{ApiRouterState, build_api_router};
 use crate::control::{ControlExecutor, default_control_executor};
 use crate::storage::{StorageError, StoragePaths};
 use crate::{AgentConfig, CoreAgent, CoreError};
@@ -78,6 +82,9 @@ pub struct RunningAgent {
     local_addr: SocketAddr,
     fingerprint_sha256: String,
     registry: Arc<RwLock<DeviceRegistry>>,
+    clients: Arc<RwLock<ClientRegistry>>,
+    approvals: Arc<RwLock<ApprovalRegistry>>,
+    notifications: Arc<RwLock<NotificationQueue>>,
     broadcast_rx_source: broadcast::Sender<String>,
     shutdown_tx: watch::Sender<bool>,
     task: tokio::task::JoinHandle<Result<(), RuntimeError>>,
@@ -100,6 +107,24 @@ impl RunningAgent {
     #[must_use]
     pub const fn registry(&self) -> &Arc<RwLock<DeviceRegistry>> {
         &self.registry
+    }
+
+    /// Returns shared access to the Universal API [`ClientRegistry`].
+    #[must_use]
+    pub const fn clients(&self) -> &Arc<RwLock<ClientRegistry>> {
+        &self.clients
+    }
+
+    /// Returns shared access to the [`ApprovalRegistry`].
+    #[must_use]
+    pub const fn approvals(&self) -> &Arc<RwLock<ApprovalRegistry>> {
+        &self.approvals
+    }
+
+    /// Returns shared access to the [`NotificationQueue`].
+    #[must_use]
+    pub const fn notifications(&self) -> &Arc<RwLock<NotificationQueue>> {
+        &self.notifications
     }
 
     /// Subscribes directly to serialized outbound JSON [`Envelope`] broadcasts.
@@ -181,11 +206,41 @@ pub async fn spawn_agent_runtime(
 /// Returns [`RuntimeError`] if core validation fails or the WSS server fails to bind.
 pub async fn spawn_agent_runtime_with_executor(
     options: RuntimeOptions,
+    collector: Box<dyn MetricCollector + Send>,
+    executor: Box<dyn ControlExecutor + Send>,
+    tls: HostTlsIdentity,
+    storage: Option<StoragePaths>,
+    initial_devices: Vec<DeviceRecord>,
+) -> Result<RunningAgent, RuntimeError> {
+    let initial_clients = match &storage {
+        Some(paths) => paths.load_clients()?,
+        None => Vec::new(),
+    };
+    spawn_agent_runtime_full(
+        options,
+        collector,
+        executor,
+        tls,
+        storage,
+        initial_devices,
+        initial_clients,
+    )
+    .await
+}
+
+/// Spawns the headless `nexdeck-agent` runtime with explicit initial devices and API clients.
+///
+/// # Errors
+///
+/// Returns [`RuntimeError`] if core validation fails or the WSS server fails to bind.
+pub async fn spawn_agent_runtime_full(
+    options: RuntimeOptions,
     mut collector: Box<dyn MetricCollector + Send>,
     executor: Box<dyn ControlExecutor + Send>,
     tls: HostTlsIdentity,
     storage: Option<StoragePaths>,
     initial_devices: Vec<DeviceRecord>,
+    initial_clients: Vec<ClientRecord>,
 ) -> Result<RunningAgent, RuntimeError> {
     let mut core = CoreAgent::new(options.agent.clone())?;
     let poll_interval = Duration::from_millis(options.agent.poll_interval_ms);
@@ -194,14 +249,43 @@ pub async fn spawn_agent_runtime_with_executor(
     last_saved_devices.sort_by(|left, right| left.device_id.cmp(&right.device_id));
     let registry = Arc::new(RwLock::new(DeviceRegistry::from_records(initial_devices)));
 
+    let mut last_saved_clients = initial_clients.clone();
+    last_saved_clients.sort_by(|left, right| left.client_id.cmp(&right.client_id));
+    let clients = Arc::new(RwLock::new(ClientRegistry::from_records(initial_clients)));
+
+    let latest_snapshot: Arc<RwLock<Option<SystemSnapshot>>> = Arc::new(RwLock::new(None));
+    let approvals = Arc::new(RwLock::new(ApprovalRegistry::new()));
+    let notifications = Arc::new(RwLock::new(NotificationQueue::new(
+        options.agent.notification_queue_capacity,
+    )));
+    let shared_executor: Arc<Mutex<Box<dyn ControlExecutor + Send>>> =
+        Arc::new(Mutex::new(executor));
+
+    let (mirror_tx, _) = broadcast::channel::<String>(128);
+    let (api_outbound_tx, mut api_outbound_rx) = mpsc::channel::<Envelope>(64);
+
+    let api_router = build_api_router(ApiRouterState::new(
+        Arc::clone(&clients),
+        Arc::clone(&latest_snapshot),
+        Arc::clone(&approvals),
+        Arc::clone(&notifications),
+        Arc::clone(&shared_executor),
+        api_outbound_tx,
+        mirror_tx.clone(),
+    ));
+
     let (inbound_tx, mut inbound_rx) = mpsc::channel::<InboundFrame>(64);
-    let server =
-        spawn_wss_server(options.bind_addr, &tls, Arc::clone(&registry), inbound_tx).await?;
+    let server = spawn_wss_server_with_routes(
+        options.bind_addr,
+        &tls,
+        Arc::clone(&registry),
+        inbound_tx,
+        Some(api_router),
+    )
+    .await?;
     let local_addr = server.local_addr();
     let fingerprint_sha256 = server.fingerprint_sha256().to_owned();
 
-    // Reuse an internal fan-out mirror or direct `WssServerHandle::subscribe_broadcast`.
-    let (mirror_tx, _) = broadcast::channel::<String>(128);
     let mirror_tx_for_loop = mirror_tx.clone();
     let mut server_rx = server.subscribe_broadcast();
     let forwarder = tokio::spawn(async move {
@@ -212,6 +296,9 @@ pub async fn spawn_agent_runtime_with_executor(
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let registry_for_loop = Arc::clone(&registry);
+    let clients_for_loop = Arc::clone(&clients);
+    let snapshot_for_loop = Arc::clone(&latest_snapshot);
+    let executor_for_loop = Arc::clone(&shared_executor);
 
     let task = tokio::spawn(async move {
         let mut tick = tokio::time::interval(poll_interval);
@@ -221,17 +308,32 @@ pub async fn spawn_agent_runtime_with_executor(
         loop {
             tokio::select! {
                 _ = tick.tick() => {
-                    publish_telemetry_sample(&mut core, collector.as_mut(), &server, &mut sequence_id);
+                    if let Some(snapshot) = publish_telemetry_sample(
+                        &mut core,
+                        collector.as_mut(),
+                        &server,
+                        &mut sequence_id,
+                    ) {
+                        *snapshot_for_loop.write().await = Some(snapshot);
+                    }
                     if let Some(paths) = &storage {
                         sync_devices_if_changed(paths, &registry_for_loop, &mut last_saved_devices).await?;
+                        sync_clients_if_changed(paths, &clients_for_loop, &mut last_saved_clients).await?;
                     }
                 }
                 maybe_frame = inbound_rx.recv() => {
                     match maybe_frame {
                         Some(frame) => {
-                            handle_inbound_frame(&server, executor.as_ref(), &frame, &mut sequence_id);
+                            if let Ok(exec_guard) = executor_for_loop.lock() {
+                                handle_inbound_frame(&server, exec_guard.as_ref(), &frame, &mut sequence_id);
+                            }
                         }
                         None => break,
+                    }
+                }
+                maybe_api_env = api_outbound_rx.recv() => {
+                    if let Some(env) = maybe_api_env {
+                        let _ = server.broadcast_envelope(&env);
                     }
                 }
                 changed = shutdown_rx.changed() => {
@@ -244,6 +346,7 @@ pub async fn spawn_agent_runtime_with_executor(
 
         if let Some(paths) = &storage {
             sync_devices_if_changed(paths, &registry_for_loop, &mut last_saved_devices).await?;
+            sync_clients_if_changed(paths, &clients_for_loop, &mut last_saved_clients).await?;
         }
         server.stop().await;
         forwarder.abort();
@@ -254,6 +357,9 @@ pub async fn spawn_agent_runtime_with_executor(
         local_addr,
         fingerprint_sha256,
         registry,
+        clients,
+        approvals,
+        notifications,
         broadcast_rx_source: mirror_tx,
         shutdown_tx,
         task,
@@ -265,18 +371,18 @@ fn publish_telemetry_sample(
     collector: &mut (dyn MetricCollector + Send),
     server: &WssServerHandle,
     sequence_id: &mut u64,
-) {
+) -> Option<SystemSnapshot> {
     let Ok(snapshot) = collector.collect() else {
-        return;
+        return None;
     };
     core.record_snapshot(snapshot.clone());
 
-    let Ok(payload) = serde_json::to_vec(&snapshot) else {
-        return;
-    };
-    let envelope = Envelope::new(*sequence_id, MessageKind::Telemetry, payload);
-    *sequence_id = next_sequence_id(*sequence_id);
-    let _ = server.broadcast_envelope(&envelope);
+    if let Ok(payload) = serde_json::to_vec(&snapshot) {
+        let envelope = Envelope::new(*sequence_id, MessageKind::Telemetry, payload);
+        *sequence_id = next_sequence_id(*sequence_id);
+        let _ = server.broadcast_envelope(&envelope);
+    }
+    Some(snapshot)
 }
 
 fn handle_inbound_frame(
@@ -364,6 +470,20 @@ async fn sync_devices_if_changed(
     current.sort_by(|left, right| left.device_id.cmp(&right.device_id));
     if current != *last_saved {
         paths.save_devices(&current)?;
+        *last_saved = current;
+    }
+    Ok(())
+}
+
+async fn sync_clients_if_changed(
+    paths: &StoragePaths,
+    clients: &Arc<RwLock<ClientRegistry>>,
+    last_saved: &mut Vec<ClientRecord>,
+) -> Result<(), StorageError> {
+    let mut current = clients.read().await.export_records();
+    current.sort_by(|left, right| left.client_id.cmp(&right.client_id));
+    if current != *last_saved {
+        paths.save_clients(&current)?;
         *last_saved = current;
     }
     Ok(())
