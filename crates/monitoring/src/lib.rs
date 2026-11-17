@@ -14,7 +14,7 @@ mod windows;
 pub use windows::WindowsCollector;
 
 /// Processor telemetry snapshot.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CpuMetrics {
     /// Total package utilization percentage (`0.0..=100.0`).
     pub total_usage_pct: f32,
@@ -27,7 +27,7 @@ pub struct CpuMetrics {
 }
 
 /// System RAM telemetry snapshot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MemoryMetrics {
     /// Total physical RAM in bytes.
     pub total_bytes: u64,
@@ -53,7 +53,7 @@ impl MemoryMetrics {
 }
 
 /// Graphics adapter telemetry snapshot.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GpuMetrics {
     /// Adapter display name.
     pub name: String,
@@ -70,7 +70,7 @@ pub struct GpuMetrics {
 }
 
 /// Storage volume telemetry snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DiskMetrics {
     /// Drive letter or mount point (e.g., `C:\`).
     pub mount_point: String,
@@ -85,7 +85,7 @@ pub struct DiskMetrics {
 }
 
 /// Network interface telemetry snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NetworkMetrics {
     /// Interface name.
     pub interface_name: String,
@@ -100,7 +100,7 @@ pub struct NetworkMetrics {
 }
 
 /// Battery telemetry snapshot for laptops/UPS devices.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BatteryMetrics {
     /// Charge percentage (`0.0..=100.0`).
     pub charge_pct: f32,
@@ -109,7 +109,7 @@ pub struct BatteryMetrics {
 }
 
 /// Aggregated hardware telemetry sample captured at a point in time.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SystemSnapshot {
     /// Capture timestamp in Unix epoch milliseconds.
     pub captured_at_epoch_ms: u64,
