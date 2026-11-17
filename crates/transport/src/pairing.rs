@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use ring::constant_time::verify_slices_are_equal;
 use ring::digest::{SHA256, digest};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
@@ -255,7 +254,16 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
 }
 
 fn constant_time_eq(a: &str, b: &str) -> bool {
-    verify_slices_are_equal(a.as_bytes(), b.as_bytes()).is_ok()
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    if a_bytes.len() != b_bytes.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&x, &y) in a_bytes.iter().zip(b_bytes.iter()) {
+        diff |= x ^ y;
+    }
+    std::hint::black_box(diff) == 0
 }
 
 fn generate_pairing_pin() -> Result<String, TransportError> {
@@ -333,7 +341,7 @@ mod tests {
 
         for attempt in 1..DEFAULT_MAX_PAIRING_ATTEMPTS {
             let err = reg.complete_pairing(
-                wrong_pin,
+                &wrong_pin,
                 "device-example-1".to_owned(),
                 "ExamplePhone".to_owned(),
                 "fp".to_owned(),
@@ -345,7 +353,7 @@ mod tests {
         // 5th invalid attempt triggers exhaustion.
         assert_eq!(
             reg.complete_pairing(
-                wrong_pin,
+                &wrong_pin,
                 "device-example-1".to_owned(),
                 "ExamplePhone".to_owned(),
                 "fp".to_owned(),

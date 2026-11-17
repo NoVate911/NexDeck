@@ -7,7 +7,7 @@
 ## Текущее состояние
 
 - **Актуальный этап:** Этап 1 (Core Agent) — **реализован WSS-сервер, TLS и pairing в `crates/transport` (PR 1.2)**.
-- **Версия workspace:** `0.1.0` (Rust Edition 2024, `rust-version = 1.85`).
+- **Версия workspace:** `0.1.0` (Rust Edition 2024, `rust-version = 1.88`).
 - **Последний выполненный шаг:** [PR #13](https://github.com/NoVate911/NexDeck/pull/13) (`WindowsCollector` в `crates/monitoring`); в `crates/transport` добавлены `HostTlsIdentity` (`rcgen`/`rustls`), `DeviceRegistry` (PIN/QR + SHA-256 хэши `device_token` с constant-time проверкой) и `axum` WSS-сервер (`/health`, `/pair`, `/ws`).
 - **Согласованные решения Этапа 1:**
   - Сеть и сервер: `tokio` (`current_thread`) + `axum` (HTTP + WebSocket) + `rustls` WSS с пиннингом отпечатка самоподписанного сертификата и pairing по PIN/QR с хранением SHA-256 хэша `device_token` ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)).
@@ -28,8 +28,8 @@
    В `Cargo.toml` внутри `[workspace.dependencies]` обязательно указывать `version = "0.1.0"` вместе с `path = "..."`, а в `deny.toml` (`[bans]`) держать `allow-wildcard-paths = true`.
 2. **CodeQL Rust (`Hard-coded cryptographic value`) реагирует на имя `nonce`:**  
    Для прикладного идентификатора запроса использовать `request_id` и генерацию значений в тестовых хелперах; криптографические токены/ключи/nonce в транспорте генерируются только через CSPRNG (не зашивать литералы даже в тестах, если имя переменной `token`/`key`/`nonce`).
-3. **Лицензии `rustls` / `ring` и `cargo-deny`:**  
-   При подключении `rustls` + `ring` в `deny.toml` понадобится `OpenSSL` в allow-листе (или `[[licenses.clarify]]` для `ring`) — обязательно проверять `cargo deny check` на PR.
+3. **Лицензии `rustls` / `ring` и `RUSTSEC-2026-0009` (`time`):**  
+   `ring 0.17.14` использует стандартную лицензию `Apache-2.0 AND ISC` (без `OpenSSL` и `clarify`). Для получения `time >= 0.3.47` (исправление `RUSTSEC-2026-0009` / `GHSA-r6v5-fh4h-64xc` через `rcgen 0.14.10`) установлен `rust-version = "1.88"`. При добавлении новых крейтов обновлять `skip` в `deny.toml` только с обоснованием.
 4. **Локальная среда Windows без C++ Build Tools (`link.exe not found`):**  
    Пока на ПК не завершена установка «Разработка классических приложений на C++», локально проверяем `cargo fmt`, `cargo check`, `cargo clippy` и `cargo doc`, а линковка/тесты прогоняются в CI.
 5. **CodeQL `rust/access-invalid-pointer` при работе с Win32 out-pointer:**  

@@ -2,7 +2,7 @@
 //!
 //! Exposes:
 //! - `GET /health` — server readiness, protocol version, and TLS certificate fingerprint;
-//! - `POST /pair` — one-time PIN pairing returning [`PairedCredentials`];
+//! - `POST /pair` — one-time PIN pairing returning [`crate::pairing::PairedCredentials`];
 //! - `GET /ws` — authenticated WebSocket transport (`Authorization: Bearer <token>`).
 
 use std::net::SocketAddr;
@@ -11,7 +11,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::Router;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Json, State};
+use axum::extract::{FromRequestParts, Json, State};
+use axum::http::request::Parts;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -19,7 +20,7 @@ use axum_server::Handle;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, broadcast, mpsc};
 
-use crate::pairing::{DeviceRegistry, PairedCredentials, PairingError};
+use crate::pairing::{DeviceRegistry, PairingError};
 use crate::tls::HostTlsIdentity;
 use crate::{Envelope, MessageKind, PROTOCOL_VERSION, TransportError};
 
@@ -227,25 +228,31 @@ async fn pair_handler(
     }
 }
 
-async fn ws_handler(
-    State(state): State<ServerState>,
-    headers: HeaderMap,
-    ws: WebSocketUpgrade,
-) -> impl IntoResponse {
-    let Some(token) = extract_bearer_token(&headers) else {
-        return (StatusCode::UNAUTHORIZED, "missing bearer token").into_response();
-    };
+struct AuthenticatedDevice(String);
 
-    let device_id = {
+impl FromRequestParts<ServerState> for AuthenticatedDevice {
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &ServerState,
+    ) -> Result<Self, Self::Rejection> {
+        let Some(token) = extract_bearer_token(&parts.headers) else {
+            return Err((StatusCode::UNAUTHORIZED, "missing bearer token"));
+        };
+
         let reg = state.registry.read().await;
         reg.authenticate_token(token)
-            .map(|record| record.device_id.clone())
-    };
+            .map(|record| Self(record.device_id.clone()))
+            .ok_or((StatusCode::UNAUTHORIZED, "invalid or revoked device token"))
+    }
+}
 
-    let Some(device_id) = device_id else {
-        return (StatusCode::UNAUTHORIZED, "invalid or revoked device token").into_response();
-    };
-
+async fn ws_handler(
+    AuthenticatedDevice(device_id): AuthenticatedDevice,
+    State(state): State<ServerState>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_ws_socket(socket, device_id, state))
         .into_response()
 }
@@ -312,6 +319,8 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use tower::ServiceExt;
+
+    use crate::pairing::PairedCredentials;
 
     fn now_ms() -> u64 {
         SystemTime::now()
