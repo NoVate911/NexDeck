@@ -6,9 +6,9 @@
 
 ## Текущее состояние
 
-- **Актуальный этап:** Этап 4 (Universal API) — выполнен **PR 4.1 (серверная часть Universal API `/api/v1/*`, `clients.json`, `ADR-0007`, CLI и Desktop Manager, Issue #30)**; следующим выполняется **PR 4.2 (клиентские SDK `sdk/python`, `sdk/js`, примеры `examples/` и документация `docs/api/`)**.
+- **Актуальный этап:** Этап 4 (Universal API) **завершён** — выполнен **PR 4.2 (клиентские SDK `sdk/python`, `sdk/js`, примеры `examples/` и документация `docs/api/`, Issue #32)**; следующим начинается **Этап 5 (Remote Approval и Центр уведомлений)**.
 - **Версия workspace:** `0.1.0` (Rust Edition 2024, `rust-version = "1.88"`; Flutter `3.50.0` / Dart `3.14.0` в `apps/mobile`).
-- **Последний выполненный шаг:** реализованы протокол и реестр сторонних клиентов (`crates/api::clients::ClientRegistry` с SHA-256 хешами токенов в `clients.json` и проверкой scopes `ApiPermission`), маршруты `/api/v1/status`, `/api/v1/metrics`, `/api/v1/notifications`, `/api/v1/approvals/*`, `/api/v1/control` и `/api/v1/ws` в `crates/core::api_routes` поверх `axum` ([ADR-0007](docs/architecture/adr/0007-universal-api-http-ws-axum.md)), CLI-флаги `--register-client` / `--list-clients` / `--revoke-client` в `nexdeck-agent` и управление клиентами в `apps/desktop`.
+- **Последний выполненный шаг:** реализованы легковесные клиентские SDK без внешних зависимостей для Python (`sdk/python/nexdeck_sdk.py`) и JavaScript/TypeScript (`sdk/js/nexdeck_sdk.mjs` + `nexdeck_sdk.d.ts`) с модульными тестами, синтетические примеры (`examples/api_approval_request.json`, `examples/api_approval_example.py`, `examples/api_notification_example.mjs`) и документация [`docs/api/universal-api.md`](docs/api/universal-api.md); итоги Этапа 4 перенесены в [`stage-4.md`](docs/journal/archive/stage-4.md).
 - **Фактические показатели `nexdeck-agent.exe` (release, LTO + strip):** размер `1 743 360` байт (`~1.66 MiB`); `--measure-ram` — `private=1.23 MiB`, `working_set=6.44 MiB`. `nexdeck-desktop.exe` — `3 614 720` байт.
 - **Согласованные решения:**
   - Сеть и сервер: `tokio` (`current_thread`) + `axum` + `rustls` WSS с пиннингом SHA-256 отпечатка и PIN/QR-pairing ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)), Universal API `/api/v1/*` поверх `axum` ([ADR-0007](docs/architecture/adr/0007-universal-api-http-ws-axum.md)).
@@ -17,10 +17,10 @@
 
 ---
 
-## Что делать следующим (Этап 4 — Universal API)
+## Что делать следующим (Этап 5 — Remote Approval и Центр уведомлений)
 
-1. **PR 4.2 (`sdk/python`, `sdk/js`, `examples/`, `docs/api/`):** реализовать легковесные клиентские SDK без внешних зависимостей для Python и JavaScript/TypeScript, синтетические примеры интеграции (`ExampleApp`, `org.example.*`) и полную документацию по Universal API.
-2. **Этап 5 (`crates/notifications`, `crates/approval`):** сквозной центр уведомлений с буфером сна и поток Remote Approval (`approval_request` от стороннего приложения -> экран телефона -> возврат решения без обхода UAC).
+1. **Этап 5 (`crates/notifications`, `crates/approval`, `crates/core`, `apps/mobile`, `apps/desktop`):** реализовать сквозной центр уведомлений с буфером сна при отключённом телефоне, интерактивный поток Remote Approval (`approval_requested` / `approval_updated` по WSS -> карточка решения на экране телефона -> возврат решения без обхода Windows UAC) и управление/просмотр в мобильном и десктопном приложениях.
+2. **Этап 6 (`crates/plugin_engine`):** изолированный WASM-движок плагинов (`wasmtime`) с жёсткими квотами памяти/CPU/времени.
 
 ---
 
@@ -55,3 +55,4 @@
 - [Этап 1 — Core Agent (мониторинг, WSS-сервер, pairing, runtime и автозапуск)](docs/journal/archive/stage-1.md)
 - [Этап 2 — Mobile Client (Flutter-клиент, TLS-пиннинг, графики телеметрии и мультимедиа-управление)](docs/journal/archive/stage-2.md)
 - [Этап 3 — Widget Engine и Desktop Manager (`crates/api`, `apps/desktop`, `apps/mobile`)](docs/journal/archive/stage-3.md)
+- [Этап 4 — Universal API (`crates/api`, `crates/core`, `apps/desktop`, `sdk/`, `examples/`)](docs/journal/archive/stage-4.md)

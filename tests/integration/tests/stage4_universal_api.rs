@@ -4,8 +4,10 @@ use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use nexdeck_api::ApiPermission;
 use nexdeck_api::clients::ClientRegistry;
+use nexdeck_api::protocol::CreateApprovalRequest;
+use nexdeck_api::{ApiPermission, ApprovalRequestPayload, ClientPolicy, submit_approval_request};
+use nexdeck_approval::ApprovalRegistry;
 use nexdeck_core::AgentConfig;
 use nexdeck_core::control::RecordingControlExecutor;
 use nexdeck_core::runtime::{RuntimeOptions, spawn_agent_runtime_full};
@@ -119,4 +121,34 @@ fn universal_api_clients_persist_and_sync_with_agent_runtime() {
 
         let _ = fs::remove_dir_all(&temp_dir);
     });
+}
+
+#[test]
+fn example_approval_request_json_matches_universal_api_contract() {
+    let raw = include_str!("../../../examples/api_approval_request.json");
+    let dto: CreateApprovalRequest =
+        serde_json::from_str(raw).expect("parse examples/api_approval_request.json");
+    assert_eq!(dto.request_id, "req-example-1");
+    assert_eq!(dto.application.as_deref(), Some("ExampleApp"));
+    assert_eq!(dto.actions, vec!["approve", "deny"]);
+
+    let now_epoch_ms = 1_700_000_000_000_u64;
+    let payload = ApprovalRequestPayload {
+        request_id: dto.request_id,
+        application: dto.application.unwrap_or_default(),
+        title: dto.title,
+        description: dto.description,
+        timeout_secs: dto.timeout_secs,
+        actions: dto.actions,
+        risk_level: dto.risk_level,
+    };
+    let policy = ClientPolicy::new(
+        "org.example.app",
+        "ExampleApp",
+        [ApiPermission::RequestApproval],
+    );
+    let mut registry = ApprovalRegistry::new();
+    submit_approval_request(&policy, &mut registry, payload, now_epoch_ms)
+        .expect("submit synthetic example approval request");
+    assert_eq!(registry.list_all().len(), 1);
 }

@@ -1,0 +1,12 @@
+{
+  "request_id": "req-example-1",
+  "application": "ExampleApp",
+  "title": "Apply synthetic workspace preset",
+  "description": "Allow ExampleApp to apply synthetic workspace configuration preset",
+  "timeout_secs": 60,
+  "actions": [
+    "approve",
+    "deny"
+  ],
+  "risk_level": "Medium"
+}
