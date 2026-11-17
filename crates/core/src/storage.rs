@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use nexdeck_api::panels::DeckConfig;
 use nexdeck_transport::TransportError;
 use nexdeck_transport::pairing::DeviceRecord;
 use nexdeck_transport::tls::HostTlsIdentity;
@@ -17,6 +18,7 @@ use crate::{AgentConfig, CoreAgent};
 const DATA_DIR_NAME: &str = "NexDeck";
 const CONFIG_FILE_NAME: &str = "config.json";
 const DEVICES_FILE_NAME: &str = "devices.json";
+const PANELS_FILE_NAME: &str = "panels.json";
 const TLS_CERT_FILE_NAME: &str = "host-cert.pem";
 const TLS_KEY_FILE_NAME: &str = "host-key.pem";
 const TLS_FINGERPRINT_FILE_NAME: &str = "host-fingerprint.sha256";
@@ -113,6 +115,12 @@ impl StoragePaths {
         self.root_dir.join(DEVICES_FILE_NAME)
     }
 
+    /// Returns the path to `panels.json`.
+    #[must_use]
+    pub fn panels_path(&self) -> PathBuf {
+        self.root_dir.join(PANELS_FILE_NAME)
+    }
+
     /// Returns the path to the host TLS certificate PEM file.
     #[must_use]
     pub fn tls_cert_path(&self) -> PathBuf {
@@ -187,6 +195,36 @@ impl StoragePaths {
         sorted.sort_by(|left, right| left.device_id.cmp(&right.device_id));
         let json = serde_json::to_vec_pretty(&sorted)?;
         write_atomic(&self.devices_path(), &json, true)
+    }
+
+    /// Loads `panels.json` or initializes it with [`DeckConfig::default_starter`] if absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if reading, parsing, grid validation, or disk persistence fails.
+    pub fn load_or_init_panels(&self) -> Result<DeckConfig, StorageError> {
+        let path = self.panels_path();
+        if path.exists() {
+            let raw = fs::read_to_string(&path)?;
+            return DeckConfig::import_json(&raw)
+                .map_err(|err| StorageError::InvalidSettings(err.to_string()));
+        }
+
+        let starter = DeckConfig::default_starter();
+        self.save_panels(&starter)?;
+        Ok(starter)
+    }
+
+    /// Validates and atomically writes `deck` to `panels.json`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if `deck` fails layout validation or disk writes fail.
+    pub fn save_panels(&self, deck: &DeckConfig) -> Result<(), StorageError> {
+        let json = deck
+            .export_json()
+            .map_err(|err| StorageError::InvalidSettings(err.to_string()))?;
+        write_atomic(&self.panels_path(), json.as_bytes(), false)
     }
 
     /// Loads an existing host TLS certificate/key pair from disk or generates and persists one.
@@ -413,6 +451,31 @@ mod tests {
         assert_eq!(reloaded.fingerprint_sha256, generated.fingerprint_sha256);
         assert_eq!(reloaded.cert_pem, generated.cert_pem);
         assert_eq!(reloaded.key_pem, generated.key_pem);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn initializes_and_persists_deck_panels() {
+        let dir = temp_storage_dir("panels");
+        let paths = StoragePaths::new(dir.clone());
+
+        let deck = paths
+            .load_or_init_panels()
+            .expect("starter panels should initialize");
+        assert_eq!(deck, DeckConfig::default_starter());
+        assert!(paths.panels_path().exists());
+
+        let mut updated = deck;
+        updated.panels[0].refresh_interval_ms = 500;
+        paths
+            .save_panels(&updated)
+            .expect("modified panels should persist");
+
+        let reloaded = paths
+            .load_or_init_panels()
+            .expect("modified panels should reload");
+        assert_eq!(reloaded.panels[0].refresh_interval_ms, 500);
 
         let _ = fs::remove_dir_all(&dir);
     }
