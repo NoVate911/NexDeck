@@ -11,7 +11,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use nexdeck_api::ApiPermission;
+use nexdeck_api::clients::{ClientRecord, ClientRegistry, IssuedClientCredentials};
 use nexdeck_api::panels::{
     DeckConfig, MAX_PANEL_COLUMNS, MAX_REFRESH_INTERVAL_MS, MIN_PANEL_COLUMNS,
     MIN_REFRESH_INTERVAL_MS, PanelConfig, TelemetryBinding, WidgetAction, WidgetIcon, WidgetKind,
@@ -332,6 +335,16 @@ pub struct DesktopManagerState {
     pub settings_draft: SettingsDraft,
     /// Registered mobile devices (token hashes only).
     pub devices: Vec<DeviceRecord>,
+    /// Registered Universal API applications (`clients.json`, token hashes only).
+    pub api_clients: Vec<ClientRecord>,
+    /// Draft application ID for registering a new API client.
+    pub new_api_client_id: String,
+    /// Draft application display name for registering a new API client.
+    pub new_api_client_name: String,
+    /// Draft permission checkboxes aligned with [`ApiPermission::ALL`].
+    pub new_api_client_permissions: [bool; 5],
+    /// Most recently issued one-time API client credentials (shown until dismissed).
+    pub latest_issued_api_client: Option<IssuedClientCredentials>,
     /// Current host TLS certificate SHA-256 fingerprint (64 hex chars).
     pub tls_fingerprint_sha256: String,
     /// Persisted deck containing customizable grid panels and widgets.
@@ -375,6 +388,9 @@ impl DesktopManagerState {
         let devices = paths
             .load_devices()
             .map_err(|err| format!("Не удалось загрузить devices.json: {err}"))?;
+        let api_clients = paths
+            .load_clients()
+            .map_err(|err| format!("Не удалось загрузить clients.json: {err}"))?;
         let tls = paths
             .load_or_create_tls_identity(&settings.san_hosts)
             .map_err(|err| format!("Не удалось загрузить TLS-идентичность: {err}"))?;
@@ -402,6 +418,11 @@ impl DesktopManagerState {
             settings,
             settings_draft,
             devices,
+            api_clients,
+            new_api_client_id: "org.example.client".to_owned(),
+            new_api_client_name: "ExampleApp".to_owned(),
+            new_api_client_permissions: [true, true, true, false, false],
+            latest_issued_api_client: None,
             tls_fingerprint_sha256: tls.fingerprint_sha256,
             deck,
             selected_panel_idx,
@@ -438,6 +459,13 @@ impl DesktopManagerState {
             Ok(devices) => self.devices = devices,
             Err(err) => {
                 self.error_message = Some(format!("Ошибка чтения devices.json: {err}"));
+                return;
+            }
+        }
+        match self.paths.load_clients() {
+            Ok(clients) => self.api_clients = clients,
+            Err(err) => {
+                self.error_message = Some(format!("Ошибка чтения clients.json: {err}"));
                 return;
             }
         }
@@ -599,6 +627,93 @@ impl DesktopManagerState {
             }
             Err(err) => {
                 self.error_message = Some(format!("Не удалось обновить devices.json: {err}"));
+            }
+        }
+    }
+
+    /// Registers a new Universal API client application and persists its token hash to `clients.json`.
+    pub fn register_api_client(&mut self) {
+        self.clear_alerts();
+        let mut reg = ClientRegistry::from_records(self.api_clients.clone());
+        let perms: Vec<ApiPermission> = ApiPermission::ALL
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(idx, perm)| self.new_api_client_permissions[idx].then_some(perm))
+            .collect();
+        let now_epoch_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+
+        match reg.register_client(
+            self.new_api_client_id.trim().to_owned(),
+            self.new_api_client_name.trim().to_owned(),
+            perms,
+            now_epoch_ms,
+        ) {
+            Ok(issued) => {
+                let records = reg.export_records();
+                match self.paths.save_clients(&records) {
+                    Ok(()) => {
+                        self.api_clients = records;
+                        self.status_message = Some(format!(
+                            "Приложение '{}' зарегистрировано в clients.json.",
+                            issued.client_id
+                        ));
+                        self.latest_issued_api_client = Some(issued);
+                    }
+                    Err(err) => {
+                        self.error_message =
+                            Some(format!("Не удалось записать clients.json: {err}"));
+                    }
+                }
+            }
+            Err(err) => {
+                self.error_message = Some(format!("Ошибка регистрации API-клиента: {err}"));
+            }
+        }
+    }
+
+    /// Toggles the `revoked` flag for an existing API client in `clients.json`.
+    pub fn set_api_client_revoked(&mut self, client_id: &str, revoked: bool) {
+        self.clear_alerts();
+        let mut reg = ClientRegistry::from_records(self.api_clients.clone());
+        if let Err(err) = reg.set_revoked(client_id, revoked) {
+            self.error_message = Some(format!("Ошибка обновления клиента '{client_id}': {err}"));
+            return;
+        }
+        let records = reg.export_records();
+        match self.paths.save_clients(&records) {
+            Ok(()) => {
+                self.api_clients = records;
+                self.status_message = Some(if revoked {
+                    format!("Доступ API-клиента '{client_id}' отозван.")
+                } else {
+                    format!("Доступ API-клиента '{client_id}' восстановлен.")
+                });
+            }
+            Err(err) => {
+                self.error_message = Some(format!("Не удалось записать clients.json: {err}"));
+            }
+        }
+    }
+
+    /// Permanently removes a registered API client from `clients.json`.
+    pub fn delete_api_client(&mut self, client_id: &str) {
+        self.clear_alerts();
+        let mut reg = ClientRegistry::from_records(self.api_clients.clone());
+        if !reg.remove_client(client_id) {
+            self.error_message = Some(format!("API-клиент '{client_id}' не найден."));
+            return;
+        }
+        let records = reg.export_records();
+        match self.paths.save_clients(&records) {
+            Ok(()) => {
+                self.api_clients = records;
+                self.status_message = Some(format!("API-клиент '{client_id}' удалён."));
+            }
+            Err(err) => {
+                self.error_message = Some(format!("Не удалось записать clients.json: {err}"));
             }
         }
     }
@@ -1568,6 +1683,20 @@ mod tests {
         assert_eq!(state.devices.len(), 1);
         assert_eq!(state.devices[0].device_id, "phone-2");
         assert_eq!(paths.load_devices().expect("reload devices").len(), 1);
+
+        state.new_api_client_id = "org.example.script".to_owned();
+        state.new_api_client_name = "ExampleScript".to_owned();
+        state.register_api_client();
+        assert!(state.error_message.is_none());
+        assert_eq!(state.api_clients.len(), 1);
+        assert!(state.latest_issued_api_client.is_some());
+
+        state.set_api_client_revoked("org.example.script", true);
+        assert!(state.api_clients[0].revoked);
+
+        state.delete_api_client("org.example.script");
+        assert!(state.api_clients.is_empty());
+        assert!(paths.load_clients().expect("reload clients").is_empty());
 
         let _ = fs::remove_dir_all(&dir);
     }

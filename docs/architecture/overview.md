@@ -81,3 +81,4 @@ flowchart TD
 - [ADR-0004: WebAssembly как основной рантайм плагинов](adr/0004-plugin-engine-wasm.md)
 - [ADR-0005: Сетевой стек (`tokio + axum + rustls`) и сопряжение устройств](adr/0005-network-stack-tokio-axum-wss.md)
 - [ADR-0006: Нативный мониторинг Windows 11 на базе `windows-sys`](adr/0006-monitoring-win32-pdh.md)
+- [ADR-0007: Транспорт и аутентификация Universal API поверх `axum` (`/api/v1/*`)](adr/0007-universal-api-http-ws-axum.md)
