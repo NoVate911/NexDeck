@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### Исправлено
+- Надёжное определение каталога данных на Android (`context.filesDir` через `MethodChannel` в `MainActivity.kt` и общий [`app_data_dir.dart`](apps/mobile/lib/src/storage/app_data_dir.dart)) для хранения `session.json` и `panels.json` без добавления сторонних плагинов, а также автовыбор установленной версии NDK в `apps/mobile/android/app/build.gradle.kts`.
+
 ### Добавлено
 - Динамический Widget Engine и редактор панелей в `apps/mobile` (`DeckStore` / `FileDeckStore` для `panels.json`, `DeckController` с троттлингом `refreshIntervalMs`, `DeckPanelView`, `DeckWidgetCard` для 9 типов виджетов и модальные редакторы стилей/привязок/JSON во вкладке «Панели» `DashboardScreen`).
 - Отдельный GUI-менеджер `nexdeck-desktop` на чистом Rust (`apps/desktop`, `eframe 0.33` / `glow`): визуальный редактор сетки панелей и виджетов (`panels.json`) с контролем коллизий и экспортом/импортом JSON, редактор настроек `config.json`, управление автозапуском `HKCU\...\Run`, запуск/остановка локального `nexdeck-agent` (включая режим `--pair` с извлечением PIN/QR), отзыв устройств (`devices.json`) и управление TLS-отпечатком.
