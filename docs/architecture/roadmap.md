@@ -11,7 +11,7 @@
 - Модульный Cargo Workspace (`0.1.0`), контракты подсистем и интеграционные тесты.
 - GitHub Actions CI, CodeQL, `cargo-deny`, Secret Scan, Dependency Review, Release workflow и Ruleset защиты `main`.
 
-### Этап 1 — Core Agent (`crates/core`, `crates/transport`, `crates/monitoring`)
+### Этап 1 — Core Agent (`crates/core`, `crates/transport`, `crates/monitoring`, завершён)
 - Фоновый режим Windows 11 и автозапуск.
 - Базовый сбор метрик (CPU, RAM, диски, сеть).
 - Wi-Fi WebSocket-сервер, сопряжение устройств и профилирование памяти (цель **2–5 МБ RAM** в простое).

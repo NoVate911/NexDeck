@@ -6,19 +6,22 @@
 
 ## Текущее состояние
 
-- **Актуальный этап:** Этап 1 (Core Agent) — **реализован WSS-сервер, TLS и pairing в `crates/transport` (PR 1.2)**.
-- **Версия workspace:** `0.1.0` (Rust Edition 2024, `rust-version = 1.88`).
-- **Последний выполненный шаг:** [PR #13](https://github.com/NoVate911/NexDeck/pull/13) (`WindowsCollector` в `crates/monitoring`); в `crates/transport` добавлены `HostTlsIdentity` (`rcgen`/`rustls`), `DeviceRegistry` (PIN/QR + SHA-256 хэши `device_token` с constant-time проверкой) и `axum` WSS-сервер (`/health`, `/pair`, `/ws`).
-- **Согласованные решения Этапа 1:**
-  - Сеть и сервер: `tokio` (`current_thread`) + `axum` (HTTP + WebSocket) + `rustls` WSS с пиннингом отпечатка самоподписанного сертификата и pairing по PIN/QR с хранением SHA-256 хэша `device_token` ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)).
-  - Мониторинг Windows 11: нативные Win32/PDH API через `windows-sys` (изолированный FFI в `crates/monitoring`) + портативный mock/адаптер для тестов и Linux CI ([ADR-0006](docs/architecture/adr/0006-monitoring-win32-pdh.md)).
-  - Desktop UI: `egui` / `eframe` с лицензией `MIT OR Apache-2.0` ([ADR-0002](docs/architecture/adr/0002-desktop-ui-pure-rust.md)).
+- **Актуальный этап:** Этап 1 (Core Agent) **завершён** — следующий шаг **Этап 2 (Mobile Client: инициализация Flutter-клиента в `apps/mobile`)**.
+- **Версия workspace:** `0.1.0` (Rust Edition 2024, `rust-version = "1.88"`).
+- **Последний выполненный шаг:** реализован runtime `Core Agent` (`crates/core`: `StoragePaths`, `autostart` через `HKCU\...\Run`, `process_metrics`, асинхронный цикл `spawn_agent_runtime` с WSS-телеметрией и CLI `--daemon`/`--pair`/`--measure-ram`), а также сериализация `SystemSnapshot` в `crates/monitoring`.
+- **Фактические показатели `nexdeck-agent.exe` (release, LTO + strip):** размер `1 738 752` байт (`~1.66 MiB`); `--daemon` на старте — `private=1.18 MiB`, `working_set=6.53 MiB` (разница обусловлена отображением разделяемых системных DLL Windows/PDH).
+- **Согласованные решения:**
+  - Сеть и сервер: `tokio` (`current_thread`) + `axum` + `rustls` WSS с пиннингом SHA-256 отпечатка и PIN/QR-pairing ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)).
+  - Мониторинг Windows 11: Win32/PDH поверх `windows-sys` (`crates/monitoring`, [ADR-0006](docs/architecture/adr/0006-monitoring-win32-pdh.md)).
+  - Desktop UI: чистый Rust `egui` / `eframe` ([ADR-0002](docs/architecture/adr/0002-desktop-ui-pure-rust.md)); Mobile Client: Flutter ([ADR-0003](docs/architecture/adr/0003-mobile-client-flutter.md)); Плагины: WebAssembly ([ADR-0004](docs/architecture/adr/0004-plugin-engine-wasm.md)).
 
 ---
 
-## Что делать следующим (Шаги Этапа 1)
+## Что делать следующим (Этап 2 — Mobile Client)
 
-1. **PR 1.3 (`crates/core`):** собрать асинхронный цикл `nexdeck-agent` (`tokio` `current_thread`), сохранение конфига/устройств, автозапуск в реестре Windows, трансляцию телеметрии по WSS и профилирование RAM (цель 2–5 МБ в простое).
+1. **Проверить окружение Flutter/Dart** и согласовать структуру проекта в `apps/mobile` (минимальные зависимости для WebSocket/TLS pinning, сканера QR-кода и графиков телеметрии).
+2. **PR 2.1 (`apps/mobile`):** создать каркас Flutter-приложения (Android / iOS), экран ввода/сканирования QR/PIN и сопряжение с `POST /pair` + пиннинг `fingerprint_sha256`.
+3. **PR 2.2 (`apps/mobile`):** подключение к `/ws`, автопереподключение, декодирование `Envelope` (`MessageKind::Telemetry`) и отображение метрик CPU/RAM/дисков/сети/батареи.
 
 ---
 
@@ -27,13 +30,13 @@
 1. **`cargo-deny` падает с `error[wildcard]` на локальных крейтах:**  
    В `Cargo.toml` внутри `[workspace.dependencies]` обязательно указывать `version = "0.1.0"` вместе с `path = "..."`, а в `deny.toml` (`[bans]`) держать `allow-wildcard-paths = true`.
 2. **CodeQL Rust (`Hard-coded cryptographic value`) реагирует на имя `nonce`:**  
-   Для прикладного идентификатора запроса использовать `request_id` и генерацию значений в тестовых хелперах; криптографические токены/ключи/nonce в транспорте генерируются только через CSPRNG (не зашивать литералы даже в тестах, если имя переменной `token`/`key`/`nonce`).
+   Для прикладного идентификатора запроса использовать `request_id` и динамическую генерацию в тестах; криптографические токены/ключи/nonce генерируются только через CSPRNG (не зашивать литералы в тестах в переменных `token`/`key`/`nonce`).
 3. **Лицензии `rustls` / `ring` и `RUSTSEC-2026-0009` (`time`):**  
-   `ring 0.17.14` использует стандартную лицензию `Apache-2.0 AND ISC` (без `OpenSSL` и `clarify`). Для получения `time >= 0.3.47` (исправление `RUSTSEC-2026-0009` / `GHSA-r6v5-fh4h-64xc` через `rcgen 0.14.10`) установлен `rust-version = "1.88"`. При добавлении новых крейтов обновлять `skip` в `deny.toml` только с обоснованием.
-4. **Локальная среда Windows без C++ Build Tools (`link.exe not found`):**  
-   Пока на ПК не завершена установка «Разработка классических приложений на C++», локально проверяем `cargo fmt`, `cargo check`, `cargo clippy` и `cargo doc`, а линковка/тесты прогоняются в CI.
-5. **CodeQL `rust/access-invalid-pointer` при работе с Win32 out-pointer:**  
-   Не разыменовывать голый `*mut T`, инициализированный через `null_mut()`, после составного `if status != 0 || ptr.is_null()`; оборачивать указатель через `NonNull::new(raw_ptr)` в RAII-обёртку и читать данные через заимствующий метод `&self`.
+   `ring 0.17.14` использует стандартную лицензию `Apache-2.0 AND ISC`. Для получения `time >= 0.3.47` (`RUSTSEC-2026-0009`) задан `rust-version = "1.88"`. При добавлении зависимостей проверять `deny.toml` на дубли версий (`errno`, `libc`, `windows-sys`).
+4. **Ограничения песочницы агента на Windows (`10013` и `code 5`):**  
+   Внутри sandbox-ограничений Windows outbound TCP `connect()` в `nexdeck-transport` возвращает `Os { code: 10013 }`, а обращение к `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` — `code 5` (`ACCESS_DENIED`). Локально проверять только несетевые тесты в sandbox, а сетевые тесты и CI прогонять на раннерах без sandbox-блокировок.
+5. **CodeQL `rust/access-invalid-pointer` и предупреждения неиспользуемого кода на Linux:**  
+   Не разыменовывать голый `*mut T` после составного условия — оборачивать указатели Win32 в `NonNull` + RAII `Drop`. Общие вспомогательные функции для Windows FFI (например, конвертеры UTF-16 в `autostart.rs`) помечать `#[cfg(any(windows, test))]`, чтобы release-сборка Linux CI не ловила `dead_code`.
 6. **Данные в коде и документации:**  
    Только синтетические примеры (`ExampleApp`, `org.example.*`, `localhost`, стандартные порты). Файл `TZ.md` не добавлять в Git.
 
@@ -42,3 +45,4 @@
 ## Архив журнала
 
 - [Этап 0 — Инициализация репозитория и базовой инфраструктуры](docs/journal/archive/stage-0.md)
+- [Этап 1 — Core Agent (мониторинг, WSS-сервер, pairing, runtime и автозапуск)](docs/journal/archive/stage-1.md)
