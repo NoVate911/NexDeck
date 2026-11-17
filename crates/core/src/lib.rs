@@ -4,6 +4,11 @@
 //! [`nexdeck_notifications`], [`nexdeck_approval`], [`nexdeck_api`], and
 //! [`nexdeck_plugin_engine`] with zero heavy UI dependencies.
 
+pub mod autostart;
+pub mod process_metrics;
+pub mod runtime;
+pub mod storage;
+
 use std::fmt;
 
 use nexdeck_api::ClientPolicy;
@@ -12,6 +17,7 @@ use nexdeck_monitoring::SystemSnapshot;
 use nexdeck_notifications::NotificationQueue;
 use nexdeck_plugin_engine::{PluginError, PluginManifest};
 use nexdeck_transport::TransportKind;
+use serde::{Deserialize, Serialize};
 
 /// Crate version synchronized via workspace metadata.
 pub const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -20,7 +26,8 @@ pub const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const TARGET_IDLE_RAM_BUDGET_BYTES: usize = 5 * 1024 * 1024;
 
 /// Configuration settings for the background `nexdeck-agent` process.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AgentConfig {
     /// Primary transport enabled at startup (MVP: [`TransportKind::WifiWebSocket`]).
     pub primary_transport: TransportKind,

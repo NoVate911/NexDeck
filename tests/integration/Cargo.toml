@@ -15,6 +15,8 @@ nexdeck-monitoring.workspace = true
 nexdeck-notifications.workspace = true
 nexdeck-plugin-engine.workspace = true
 nexdeck-transport.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true
