@@ -113,10 +113,32 @@ jobs:
           ./target/release/nexdeck-agent --version
           ./target/release/nexdeck-desktop --version
 
+  mobile:
+    name: Mobile Client (Flutter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install Flutter dependencies
+        working-directory: apps/mobile
+        run: flutter pub get
+      - name: Check Dart formatting
+        working-directory: apps/mobile
+        run: dart format --output=none --set-exit-if-changed lib test
+      - name: Analyze Flutter code
+        working-directory: apps/mobile
+        run: flutter analyze --fatal-infos
+      - name: Run Flutter tests
+        working-directory: apps/mobile
+        run: flutter test
+
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
-    needs: [format, check-and-lint, unit-tests, integration-tests, docs, build]
+    needs: [format, check-and-lint, unit-tests, integration-tests, docs, build, mobile]
     if: always()
     steps:
       - name: Verify all required CI jobs passed
@@ -126,7 +148,8 @@ jobs:
              [ "${{ needs.unit-tests.result }}" != "success" ] || \
              [ "${{ needs.integration-tests.result }}" != "success" ] || \
              [ "${{ needs.docs.result }}" != "success" ] || \
-             [ "${{ needs.build.result }}" != "success" ]; then
+             [ "${{ needs.build.result }}" != "success" ] || \
+             [ "${{ needs.mobile.result }}" != "success" ]; then
             echo "One or more CI jobs failed:"
             echo "format=${{ needs.format.result }}"
             echo "check-and-lint=${{ needs.check-and-lint.result }}"
@@ -134,5 +157,6 @@ jobs:
             echo "integration-tests=${{ needs.integration-tests.result }}"
             echo "docs=${{ needs.docs.result }}"
             echo "build=${{ needs.build.result }}"
+            echo "mobile=${{ needs.mobile.result }}"
             exit 1
           fi
