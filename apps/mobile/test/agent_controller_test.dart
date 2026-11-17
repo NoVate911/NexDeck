@@ -74,7 +74,14 @@ class _StubTransport implements NexDeckTransport {
     _states.add(_state);
   }
 
-  void emitTelemetry(double cpuPct, int seq) {
+  final List<Envelope> sentEnvelopes = [];
+
+  void emitTelemetry(
+    double cpuPct,
+    int seq, {
+    int rxBytesPerSec = 4096,
+    int txBytesPerSec = 1024,
+  }) {
     _envelopes.add(
       Envelope.json(
         messageId: seq,
@@ -91,15 +98,40 @@ class _StubTransport implements NexDeckTransport {
           'memory': {'total_bytes': 8192, 'used_bytes': 4096},
           'gpus': const <Object?>[],
           'disks': const <Object?>[],
-          'networks': const <Object?>[],
+          'networks': [
+            {
+              'interface_name': 'ExampleEthernet',
+              'tx_bytes_per_sec': txBytesPerSec,
+              'rx_bytes_per_sec': rxBytesPerSec,
+              'total_tx_bytes': 10240,
+              'total_rx_bytes': 40960,
+            },
+          ],
           'battery': null,
         },
       ),
     );
   }
 
+  void emitControlAck(String commandId, ControlAction action) {
+    _envelopes.add(
+      Envelope.json(
+        messageId: 99,
+        kind: MessageKind.controlCommand,
+        body: {
+          'command_id': commandId,
+          'action': action.wireName,
+          'ok': true,
+          'message': 'Executed ${action.wireName}',
+        },
+      ),
+    );
+  }
+
   @override
-  Future<void> sendEnvelope(Envelope envelope) async {}
+  Future<void> sendEnvelope(Envelope envelope) async {
+    sentEnvelopes.add(envelope);
+  }
 
   @override
   Future<void> disconnect() async {
@@ -144,12 +176,32 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     expect(controller.cpuHistory, [30.0, 40.0, 50.0]);
+    expect(controller.ramHistory, [50.0, 50.0, 50.0]);
+    expect(controller.networkRxKibHistory, [4.0, 4.0, 4.0]);
+    expect(controller.networkTxKibHistory, [1.0, 1.0, 1.0]);
     expect(controller.latestSnapshot?.uptimeSecs, 65);
+
+    await controller.sendControlAction(ControlAction.mediaPlayPause);
+    expect(transport.sentEnvelopes, hasLength(1));
+    final sentPayload = transport.sentEnvelopes.single.decodePayloadJson();
+    expect(sentPayload['action'], 'MediaPlayPause');
+
+    transport.emitControlAck(
+      sentPayload['command_id']! as String,
+      ControlAction.mediaPlayPause,
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.lastControlResult?.ok, isTrue);
+    expect(controller.lastControlResult?.action, ControlAction.mediaPlayPause);
 
     await controller.unpairHost();
     expect(controller.session, isNull);
     expect(await store.loadSession(), isNull);
     expect(controller.cpuHistory, isEmpty);
+    expect(controller.ramHistory, isEmpty);
+    expect(controller.networkRxKibHistory, isEmpty);
+    expect(controller.networkTxKibHistory, isEmpty);
+    expect(controller.lastControlResult, isNull);
   });
 
   test('schedules reconnect after unexpected socket drop', () async {

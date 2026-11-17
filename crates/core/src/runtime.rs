@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use nexdeck_monitoring::MetricCollector;
+use nexdeck_transport::control::{ControlCommandRequest, ControlCommandResponse};
 use nexdeck_transport::pairing::{DeviceRecord, DeviceRegistry, PairingQrPayload};
 use nexdeck_transport::server::{InboundFrame, WssServerHandle, spawn_wss_server};
 use nexdeck_transport::tls::HostTlsIdentity;
@@ -13,6 +14,7 @@ use nexdeck_transport::{Envelope, MessageKind, PROTOCOL_VERSION, TransportError}
 use tokio::sync::{RwLock, broadcast, mpsc, watch};
 use tokio::time::MissedTickBehavior;
 
+use crate::control::{ControlExecutor, default_control_executor};
 use crate::storage::{StorageError, StoragePaths};
 use crate::{AgentConfig, CoreAgent, CoreError};
 
@@ -153,7 +155,34 @@ impl RunningAgent {
 /// Returns [`RuntimeError`] if core validation fails or the WSS server fails to bind.
 pub async fn spawn_agent_runtime(
     options: RuntimeOptions,
+    collector: Box<dyn MetricCollector + Send>,
+    tls: HostTlsIdentity,
+    storage: Option<StoragePaths>,
+    initial_devices: Vec<DeviceRecord>,
+) -> Result<RunningAgent, RuntimeError> {
+    spawn_agent_runtime_with_executor(
+        options,
+        collector,
+        default_control_executor(),
+        tls,
+        storage,
+        initial_devices,
+    )
+    .await
+}
+
+/// Spawns the headless `nexdeck-agent` async runtime with a custom [`ControlExecutor`].
+///
+/// Useful for deterministic testing or custom host command executors without
+/// injecting real OS keyboard events.
+///
+/// # Errors
+///
+/// Returns [`RuntimeError`] if core validation fails or the WSS server fails to bind.
+pub async fn spawn_agent_runtime_with_executor(
+    options: RuntimeOptions,
     mut collector: Box<dyn MetricCollector + Send>,
+    executor: Box<dyn ControlExecutor + Send>,
     tls: HostTlsIdentity,
     storage: Option<StoragePaths>,
     initial_devices: Vec<DeviceRecord>,
@@ -199,7 +228,9 @@ pub async fn spawn_agent_runtime(
                 }
                 maybe_frame = inbound_rx.recv() => {
                     match maybe_frame {
-                        Some(frame) => handle_inbound_frame(&server, &frame, &mut sequence_id),
+                        Some(frame) => {
+                            handle_inbound_frame(&server, executor.as_ref(), &frame, &mut sequence_id);
+                        }
                         None => break,
                     }
                 }
@@ -248,24 +279,73 @@ fn publish_telemetry_sample(
     let _ = server.broadcast_envelope(&envelope);
 }
 
-fn handle_inbound_frame(server: &WssServerHandle, frame: &InboundFrame, sequence_id: &mut u64) {
+fn handle_inbound_frame(
+    server: &WssServerHandle,
+    executor: &dyn ControlExecutor,
+    frame: &InboundFrame,
+    sequence_id: &mut u64,
+) {
+    if let Some(reply) = build_inbound_reply(executor, frame, *sequence_id) {
+        *sequence_id = next_sequence_id(*sequence_id);
+        let _ = server.broadcast_envelope(&reply);
+    }
+}
+
+/// Validates and routes an authenticated [`InboundFrame`], producing an optional response [`Envelope`].
+#[must_use]
+pub fn build_inbound_reply(
+    executor: &dyn ControlExecutor,
+    frame: &InboundFrame,
+    reply_sequence_id: u64,
+) -> Option<Envelope> {
     if frame.envelope.validate().is_err() {
-        return;
+        return None;
     }
 
     match frame.envelope.kind {
-        MessageKind::Heartbeat => {
-            let ack = Envelope::new(*sequence_id, MessageKind::Heartbeat, Vec::new());
-            *sequence_id = next_sequence_id(*sequence_id);
-            let _ = server.broadcast_envelope(&ack);
+        MessageKind::Heartbeat => Some(Envelope::new(
+            reply_sequence_id,
+            MessageKind::Heartbeat,
+            Vec::new(),
+        )),
+        MessageKind::ControlCommand => {
+            let Ok(req) = serde_json::from_slice::<ControlCommandRequest>(&frame.envelope.payload)
+            else {
+                return None;
+            };
+            let response = match req.validate() {
+                Ok(()) => match executor.execute(req.action) {
+                    Ok(message) => ControlCommandResponse {
+                        command_id: req.command_id,
+                        action: req.action,
+                        ok: true,
+                        message,
+                    },
+                    Err(err) => ControlCommandResponse {
+                        command_id: req.command_id,
+                        action: req.action,
+                        ok: false,
+                        message: err,
+                    },
+                },
+                Err(err) => ControlCommandResponse {
+                    command_id: req.command_id,
+                    action: req.action,
+                    ok: false,
+                    message: err.to_string(),
+                },
+            };
+            let payload = serde_json::to_vec(&response).ok()?;
+            Some(Envelope::new(
+                reply_sequence_id,
+                MessageKind::ControlCommand,
+                payload,
+            ))
         }
-        MessageKind::ControlCommand
-        | MessageKind::Telemetry
-        | MessageKind::Notification
-        | MessageKind::Approval => {
-            // Stage 1 handles authenticated heartbeats directly; subsystem routing for
-            // approvals, notifications, and control commands lands in Stages 2–5.
+        MessageKind::Telemetry | MessageKind::Notification | MessageKind::Approval => {
+            // Subsystem routing for notifications and remote approvals lands in Stages 4–5.
             let _ = &frame.device_id;
+            None
         }
     }
 }
@@ -406,5 +486,53 @@ mod tests {
 
             let _ = fs::remove_dir_all(&temp_dir);
         });
+    }
+
+    #[test]
+    fn routes_valid_control_command_and_rejects_invalid_id() {
+        use crate::control::RecordingControlExecutor;
+        use nexdeck_transport::control::ControlAction;
+
+        let executor = RecordingControlExecutor::new();
+        let req = ControlCommandRequest {
+            command_id: "cmd-7".to_owned(),
+            action: ControlAction::MediaPlayPause,
+        };
+        let frame = InboundFrame {
+            device_id: "example-device-1".to_owned(),
+            envelope: Envelope::new(
+                1,
+                MessageKind::ControlCommand,
+                serde_json::to_vec(&req).expect("encode"),
+            ),
+        };
+
+        let reply = build_inbound_reply(&executor, &frame, 42).expect("reply expected");
+        assert_eq!(reply.kind, MessageKind::ControlCommand);
+        let decoded: ControlCommandResponse =
+            serde_json::from_slice(&reply.payload).expect("decode response");
+        assert!(decoded.ok);
+        assert_eq!(decoded.command_id, "cmd-7");
+        assert_eq!(decoded.action, ControlAction::MediaPlayPause);
+        assert_eq!(executor.actions(), vec![ControlAction::MediaPlayPause]);
+
+        let invalid_req = ControlCommandRequest {
+            command_id: "bad id with spaces".to_owned(),
+            action: ControlAction::VolumeUp,
+        };
+        let invalid_frame = InboundFrame {
+            device_id: "example-device-1".to_owned(),
+            envelope: Envelope::new(
+                2,
+                MessageKind::ControlCommand,
+                serde_json::to_vec(&invalid_req).expect("encode"),
+            ),
+        };
+        let invalid_reply =
+            build_inbound_reply(&executor, &invalid_frame, 43).expect("error reply expected");
+        let decoded_err: ControlCommandResponse =
+            serde_json::from_slice(&invalid_reply.payload).expect("decode error");
+        assert!(!decoded_err.ok);
+        assert_eq!(executor.actions(), vec![ControlAction::MediaPlayPause]);
     }
 }

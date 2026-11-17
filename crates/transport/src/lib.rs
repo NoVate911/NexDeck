@@ -8,6 +8,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+pub mod control;
 pub mod pairing;
 pub mod server;
 pub mod tls;
