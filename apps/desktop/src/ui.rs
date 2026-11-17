@@ -1,8 +1,11 @@
 //! Pure-Rust Desktop Manager GUI implemented with `eframe` / `egui`.
 //!
-//! Styled in a Clean Modern (Windows 11 Fluent / macOS) design language with
-//! matte layered surfaces, subtle 1px borders, generous spacing, a left
-//! navigation sidebar, and smooth micro-animations.
+//! Designed as an intuitive consumer studio with:
+//! - 1-click phone pairing and real vector QR code rendering (`QrMatrix`),
+//! - True mouse Drag-and-Drop from the widget catalog onto a smartphone canvas,
+//! - Direct mouse dragging to move/swap widgets on the grid and corner-handle resizing,
+//! - Instant auto-save and 1-click color theme swatches,
+//! - Custom vector icons (`draw_vector_icon`) so no system emoji font is required.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -10,25 +13,96 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use eframe::egui::{
-    self, Align, Align2, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
-    Layout, Margin, Pos2, Rect, RichText, ScrollArea, Sense, Stroke, StrokeKind, TextStyle, Vec2,
+    self, Align, Align2, Color32, CornerRadius, CursorIcon, FontData, FontDefinitions, FontFamily,
+    FontId, Id, LayerId, Layout, Margin, Order, Pos2, Rect, RichText, ScrollArea, Sense, Shape,
+    Stroke, StrokeKind, TextStyle, Vec2,
 };
-use nexdeck_api::ApiPermission;
 use nexdeck_api::panels::{
-    MAX_PANEL_COLUMNS, MAX_REFRESH_INTERVAL_MS, MIN_PANEL_COLUMNS, MIN_REFRESH_INTERVAL_MS,
-    WidgetKind, WidgetSpec, WidgetStyle,
+    MAX_PANEL_COLUMNS, MIN_PANEL_COLUMNS, WidgetIcon, WidgetKind, WidgetSpec,
 };
 use nexdeck_core::AGENT_VERSION;
-use nexdeck_transport::PROTOCOL_VERSION;
 
+use crate::qr::QrMatrix;
 use crate::state::{
-    DesktopManagerState, DesktopTab, action_label, all_telemetry_bindings, all_widget_actions,
-    all_widget_icons, all_widget_kinds, icon_label, telemetry_label, widget_kind_label,
+    DesktopManagerState, DesktopTab, WidgetPreset, action_label, all_telemetry_bindings,
+    all_widget_actions, all_widget_icons, all_widget_kinds, detect_lan_ipv4, icon_label,
+    resolve_agent_exe_in_dir, telemetry_label, widget_kind_label,
 };
 
 const GRID_CELL_GAP: f32 = 10.0;
 const GRID_MIN_ROWS: u16 = 4;
 const ANIM_DURATION: f32 = 0.18;
+
+/// Active mouse drag operation inside the Deck Constructor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DragPayload {
+    /// Dragging a ready-made template from the left catalog onto the grid.
+    CatalogPreset(WidgetPreset),
+    /// Dragging an existing widget across the grid to move or swap it.
+    MoveWidget {
+        widget_id: String,
+        title: String,
+        col_span: u16,
+        row_span: u16,
+        accent_hex: String,
+    },
+    /// Dragging the bottom-right corner handle of a widget to resize `(col_span, row_span)`.
+    ResizeWidget {
+        widget_id: String,
+        origin_col: u16,
+        origin_row: u16,
+    },
+}
+
+/// Curated 1-click color swatches for widget styling.
+struct ColorSwatch {
+    name: &'static str,
+    bg_hex: &'static str,
+    accent_hex: &'static str,
+}
+
+const COLOR_SWATCHES: &[ColorSwatch] = &[
+    ColorSwatch {
+        name: "Океан",
+        bg_hex: "#162238",
+        accent_hex: "#38BDF8",
+    },
+    ColorSwatch {
+        name: "Индиго",
+        bg_hex: "#1D2D50",
+        accent_hex: "#60A5FA",
+    },
+    ColorSwatch {
+        name: "Изумруд",
+        bg_hex: "#112A26",
+        accent_hex: "#10B981",
+    },
+    ColorSwatch {
+        name: "Фиолет",
+        bg_hex: "#251838",
+        accent_hex: "#A855F7",
+    },
+    ColorSwatch {
+        name: "Бирюза",
+        bg_hex: "#132A2E",
+        accent_hex: "#2DD4BF",
+    },
+    ColorSwatch {
+        name: "Янтарь",
+        bg_hex: "#2E2112",
+        accent_hex: "#F59E0B",
+    },
+    ColorSwatch {
+        name: "Рубин",
+        bg_hex: "#311820",
+        accent_hex: "#F87171",
+    },
+    ColorSwatch {
+        name: "Графит",
+        bg_hex: "#1E2636",
+        accent_hex: "#94A3B8",
+    },
+];
 
 /// Clean Modern theme palette (Fluent Dark & Clean Light).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,7 +169,10 @@ pub struct NexDeckDesktopApp {
     widget_draft: Option<WidgetDraft>,
     panel_meta_draft: Option<PanelMetaDraft>,
     dark_mode: bool,
-    show_json_drawer: bool,
+    show_pairing_modal: bool,
+    show_advanced_settings: bool,
+    active_drag: Option<DragPayload>,
+    selected_empty_cell: Option<(u16, u16)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,19 +190,31 @@ struct WidgetDraft {
 }
 
 impl NexDeckDesktopApp {
-    /// Initializes visual theme, optional Windows Cyrillic font fallback, and initial drafts.
+    /// Initializes visual theme, optional Windows Cyrillic font fallback, and auto-starts agent if present.
     #[must_use]
-    pub fn new(cc: &eframe::CreationContext<'_>, state: DesktopManagerState) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, mut state: DesktopManagerState) -> Self {
         configure_fonts(&cc.egui_ctx);
-        let dark_mode = true;
         apply_clean_modern_theme(&cc.egui_ctx, ThemePalette::fluent_dark());
+
+        // Automatically start the background agent if its binary sits next to nexdeck-desktop.exe.
+        if !state.agent_process.is_running()
+            && std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().and_then(resolve_agent_exe_in_dir))
+                .is_some()
+        {
+            state.connect_phone_one_click();
+        }
 
         let mut app = Self {
             state,
             widget_draft: None,
             panel_meta_draft: None,
-            dark_mode,
-            show_json_drawer: false,
+            dark_mode: true,
+            show_pairing_modal: false,
+            show_advanced_settings: false,
+            active_drag: None,
+            selected_empty_cell: None,
         };
         app.sync_drafts_from_selection();
         app
@@ -164,7 +253,7 @@ impl NexDeckDesktopApp {
                 let needs_sync = self
                     .widget_draft
                     .as_ref()
-                    .is_none_or(|draft| draft.panel_id != panel_id || draft.spec.id != spec.id);
+                    .is_none_or(|draft| draft.panel_id != panel_id || draft.spec != spec);
                 if needs_sync {
                     self.widget_draft = Some(WidgetDraft {
                         panel_id: panel_id.to_owned(),
@@ -188,8 +277,8 @@ impl NexDeckDesktopApp {
 impl eframe::App for NexDeckDesktopApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let running = self.state.agent_process.is_running();
-        if running {
-            ctx.request_repaint_after(Duration::from_millis(250));
+        if running || self.active_drag.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(200));
         }
 
         self.sync_drafts_from_selection();
@@ -212,27 +301,27 @@ impl eframe::App for NexDeckDesktopApp {
             .frame(
                 egui::Frame::new()
                     .fill(theme.canvas_bg)
-                    .inner_margin(Margin::symmetric(24, 20)),
+                    .inner_margin(Margin::symmetric(24, 18)),
             )
             .show(ctx, |ui| {
                 self.draw_page_header(ui, running, theme);
-                ui.add_space(14.0);
-
-                // Smooth micro-animation when switching tabs.
-                let tab_idx = match self.state.active_tab {
-                    DesktopTab::Panels => 0.0_f32,
-                    DesktopTab::AgentSettings => 1.0_f32,
-                    DesktopTab::DevicesAndTls => 2.0_f32,
-                };
-                let _animated_tab =
-                    ctx.animate_value_with_time(egui::Id::new("active_tab_anim"), tab_idx, 0.20);
+                ui.add_space(12.0);
 
                 match self.state.active_tab {
                     DesktopTab::Panels => self.draw_panels_tab(ui, ctx, theme),
-                    DesktopTab::AgentSettings => self.draw_agent_tab(ui, ctx, running, theme),
+                    DesktopTab::AgentSettings => self.draw_connection_tab(ui, ctx, running, theme),
                     DesktopTab::DevicesAndTls => self.draw_devices_tab(ui, ctx, theme),
                 }
             });
+
+        if self.show_pairing_modal {
+            self.draw_pairing_modal_window(ctx, theme);
+        }
+
+        // Clear any finished drag if mouse button is no longer held down.
+        if self.active_drag.is_some() && !ctx.input(|i| i.pointer.any_down()) {
+            self.active_drag = None;
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -266,47 +355,49 @@ impl NexDeckDesktopApp {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 ui.label(
                     RichText::new("NexDeck Studio")
-                        .size(17.0)
+                        .size(17.5)
                         .strong()
                         .color(theme.text_primary),
                 );
                 ui.label(
-                    RichText::new(format!("v{AGENT_VERSION} • Протокол v{PROTOCOL_VERSION}"))
+                    RichText::new(format!("Версия {AGENT_VERSION}"))
                         .size(11.5)
                         .color(theme.text_secondary),
                 );
             });
         });
 
-        ui.add_space(18.0);
+        ui.add_space(16.0);
 
-        // Live Agent Status Card in Sidebar
-        fluent_card(ui, theme, |ui| {
+        // 1-Click Hero Button: Connect Phone
+        let connect_btn = egui::Button::new(
+            RichText::new("Подключить телефон")
+                .size(14.5)
+                .strong()
+                .color(Color32::WHITE),
+        )
+        .fill(theme.accent)
+        .corner_radius(CornerRadius::same(10))
+        .min_size(Vec2::new(ui.available_width(), 42.0));
+
+        if ui.add(connect_btn).clicked() {
+            self.state.connect_phone_one_click();
+            self.show_pairing_modal = true;
+        }
+
+        ui.add_space(10.0);
+
+        // Compact Live Agent Status Pill
+        fluent_card_compact(ui, theme, |ui| {
             let anim_run = ctx.animate_bool_with_time(
-                egui::Id::new("agent_status_dot"),
+                Id::new("agent_status_dot"),
                 agent_running,
                 ANIM_DURATION,
             );
-            let (dot_color, status_title, status_sub) = if agent_running {
-                if self.state.agent_process.is_pair_mode() {
-                    (
-                        theme.accent,
-                        "Режим сопряжения",
-                        "Ожидание подключения телефона по PIN/QR",
-                    )
-                } else {
-                    (
-                        theme.status_ok,
-                        "Агент активен",
-                        "Локальный WSS и Universal API работают",
-                    )
-                }
+            let (dot_color, status_title) = if agent_running {
+                (theme.status_ok, "Сервер активен в фоне")
             } else {
-                (
-                    theme.status_warn,
-                    "Агент не запущен",
-                    "Нажмите кнопку ниже для старта",
-                )
+                (theme.status_warn, "Сервер остановлен")
             };
 
             ui.horizontal(|ui| {
@@ -320,43 +411,37 @@ impl NexDeckDesktopApp {
                             dot_color.r(),
                             dot_color.g(),
                             dot_color.b(),
-                            48,
+                            52,
                         ),
                     );
                 }
                 painter.circle_filled(dot_rect.center(), 4.5, dot_color);
                 ui.label(
                     RichText::new(status_title)
-                        .size(13.5)
+                        .size(12.5)
                         .strong()
                         .color(theme.text_primary),
                 );
             });
-            ui.label(
-                RichText::new(status_sub)
-                    .size(11.5)
-                    .color(theme.text_secondary),
-            );
-            ui.add_space(6.0);
 
-            ui.horizontal(|ui| {
-                if !agent_running {
-                    if primary_button(ui, "▶ Старт", theme).clicked() {
-                        self.state.start_agent(false);
-                    }
-                    if secondary_button(ui, "🔗 С PIN", theme).clicked() {
-                        self.state.start_agent(true);
-                        self.state.active_tab = DesktopTab::AgentSettings;
-                    }
-                } else if danger_button(ui, "■ Остановить", theme).clicked() {
-                    self.state.stop_agent();
-                }
-            });
+            if let Some((pin, host_port, _)) = self.state.resolved_pairing_qr_payload() {
+                ui.label(
+                    RichText::new(format!("PIN: {pin} • {host_port}"))
+                        .size(11.5)
+                        .color(theme.accent),
+                );
+            } else if let Some(lan_ip) = detect_lan_ipv4() {
+                ui.label(
+                    RichText::new(format!("Сеть Wi-Fi: {lan_ip}"))
+                        .size(11.5)
+                        .color(theme.text_secondary),
+                );
+            }
         });
 
         ui.add_space(18.0);
         ui.label(
-            RichText::new("НАВИГАЦИЯ")
+            RichText::new("РАЗДЕЛЫ")
                 .size(11.0)
                 .strong()
                 .color(theme.text_secondary),
@@ -366,26 +451,30 @@ impl NexDeckDesktopApp {
         let nav_items = [
             (
                 DesktopTab::Panels,
-                "⊞  Конструктор деки",
-                "Визуальные панели и сетка",
+                NavIconKind::Grid,
+                "Конструктор экрана",
+                "Перетаскивание виджетов мышью",
             ),
             (
                 DesktopTab::AgentSettings,
-                "⚡  Агент и подключение",
-                "Сопряжение, журнал и автозапуск",
+                NavIconKind::Phone,
+                "Подключение и ПК",
+                "QR-код, PIN и автозапуск",
             ),
             (
                 DesktopTab::DevicesAndTls,
-                "🛡  Безопасность и API",
-                "Устройства, TLS и токены",
+                NavIconKind::Shield,
+                "Устройства и доступ",
+                "Телефоны и сторонние программы",
             ),
         ];
 
-        for (tab, title, subtitle) in nav_items {
+        for (tab, icon_kind, title, subtitle) in nav_items {
             if draw_sidebar_nav_item(
                 ui,
                 ctx,
                 tab,
+                icon_kind,
                 self.state.active_tab == tab,
                 title,
                 subtitle,
@@ -397,27 +486,17 @@ impl NexDeckDesktopApp {
         }
 
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-            ui.label(
-                RichText::new(format!(
-                    "Хранилище: {}",
-                    self.state.paths.root_dir().display()
-                ))
-                .size(11.0)
-                .color(theme.text_secondary),
-            );
-            ui.add_space(8.0);
-
             ui.horizontal(|ui| {
                 let theme_label = if self.dark_mode {
-                    "☀ Светлая тема"
+                    "Светлая тема"
                 } else {
-                    "🌙 Тёмная тема"
+                    "Тёмная тема"
                 };
                 if secondary_button(ui, theme_label, theme).clicked() {
                     self.dark_mode = !self.dark_mode;
                     apply_clean_modern_theme(ctx, self.palette());
                 }
-                if secondary_button(ui, "↻ Обновить", theme).clicked() {
+                if secondary_button(ui, "Обновить", theme).clicked() {
                     self.state.refresh_from_disk();
                     self.force_resync_drafts();
                 }
@@ -428,25 +507,25 @@ impl NexDeckDesktopApp {
     fn draw_page_header(&mut self, ui: &mut egui::Ui, running: bool, theme: ThemePalette) {
         let (title, subtitle) = match self.state.active_tab {
             DesktopTab::Panels => (
-                "Конструктор интерактивных панелей",
-                "Настраивайте раскладку виджетов, показатели телеметрии и горячие клавиши для мобильного клиента",
+                "Конструктор экрана телефона",
+                "Перетащите любой виджет мышью из каталога слева прямо на экран смартфона",
             ),
             DesktopTab::AgentSettings => (
-                "Управление фоновым агентом и сопряжением",
-                "Запуск локального WSS-сервера, выпуск PIN/QR-кода для телефона и настройка автозапуска Windows",
+                "Подключение телефона и работа в фоне",
+                "Отсканируйте QR-код или введите 6-значный PIN-код в мобильном приложении NexDeck",
             ),
             DesktopTab::DevicesAndTls => (
-                "Центр безопасности, устройств и Universal API",
-                "Управление доверенными телефонами, SHA-256 отпечатком сертификата и токенами сторонних приложений",
+                "Подключённые устройства и приложения",
+                "Управление доступом телефонов и внешних плагинов",
             ),
         };
 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 3.0;
+                ui.spacing_mut().item_spacing.y = 2.0;
                 ui.label(
                     RichText::new(title)
-                        .size(22.0)
+                        .size(21.0)
                         .strong()
                         .color(theme.text_primary),
                 );
@@ -458,38 +537,21 @@ impl NexDeckDesktopApp {
             });
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let (pill_bg, pill_fg, pill_text) = if running {
-                    (
-                        Color32::from_rgba_unmultiplied(
-                            theme.status_ok.r(),
-                            theme.status_ok.g(),
-                            theme.status_ok.b(),
-                            32,
-                        ),
-                        theme.status_ok,
-                        format!("● WSS {}", self.state.settings_draft.bind_addr),
-                    )
-                } else {
-                    (
-                        theme.card_elevated_bg,
-                        theme.text_secondary,
-                        format!("○ WSS {}", self.state.settings_draft.bind_addr),
-                    )
-                };
-                egui::Frame::new()
-                    .fill(pill_bg)
-                    .stroke(Stroke::new(1.0_f32, theme.card_border))
-                    .corner_radius(CornerRadius::same(20))
-                    .inner_margin(Margin::symmetric(12, 6))
-                    .show(ui, |ui| {
-                        ui.label(RichText::new(pill_text).size(12.5).strong().color(pill_fg));
-                    });
+                if !running {
+                    if primary_button(ui, "Запустить фоновый сервер", theme).clicked()
+                    {
+                        self.state.connect_phone_one_click();
+                    }
+                } else if secondary_button(ui, "Показать QR и PIN", theme).clicked() {
+                    self.state.connect_phone_one_click();
+                    self.show_pairing_modal = true;
+                }
             });
         });
 
-        // Inline toast banner for status or error feedback
+        // Friendly dismissible notification bar
         if self.state.error_message.is_some() || self.state.status_message.is_some() {
-            ui.add_space(10.0);
+            ui.add_space(8.0);
             let is_err = self.state.error_message.is_some();
             let banner_color = if is_err {
                 theme.status_err
@@ -510,16 +572,16 @@ impl NexDeckDesktopApp {
                     banner_color.r(),
                     banner_color.g(),
                     banner_color.b(),
-                    26,
+                    24,
                 ))
                 .stroke(Stroke::new(1.0_f32, banner_color))
                 .corner_radius(CornerRadius::same(10))
-                .inner_margin(Margin::symmetric(14, 8))
+                .inner_margin(Margin::symmetric(14, 7))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&text).size(13.0).strong().color(banner_color));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.small_button("✕").clicked() {
+                            if ui.small_button("Закрыть").clicked() {
                                 dismiss = true;
                             }
                         });
@@ -532,34 +594,135 @@ impl NexDeckDesktopApp {
         }
     }
 
+    fn draw_pairing_modal_window(&mut self, ctx: &egui::Context, theme: ThemePalette) {
+        let mut open = self.show_pairing_modal;
+        egui::Window::new("Подключение телефона к ПК")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .fixed_size(Vec2::new(480.0, 440.0))
+            .frame(
+                egui::Frame::new()
+                    .fill(theme.card_bg)
+                    .stroke(Stroke::new(1.5_f32, theme.accent))
+                    .corner_radius(CornerRadius::same(16))
+                    .inner_margin(Margin::same(22)),
+            )
+            .show(ctx, |ui| {
+                self.draw_pairing_card_contents(ui, ctx, theme);
+            });
+        self.show_pairing_modal = open;
+    }
+
+    fn draw_pairing_card_contents(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        theme: ThemePalette,
+    ) {
+        if let Some((pin, host_port, qr_json)) = self.state.resolved_pairing_qr_payload() {
+            ui.columns(2, |cols| {
+                // Left: Real Vector QR Code on crisp white card
+                cols[0].vertical_centered(|ui| {
+                    draw_qr_code_widget(ui, &qr_json, 196.0);
+                    ui.add_space(6.0);
+                    if secondary_button(ui, "Скопировать код подключения", theme).clicked() {
+                        ctx.copy_text(qr_json);
+                    }
+                });
+
+                // Right: Huge PIN & 3 simple steps
+                cols[1].vertical(|ui| {
+                    ui.label(
+                        RichText::new("ПИН-КОД ДЛЯ ТЕЛЕФОНА")
+                            .size(11.5)
+                            .strong()
+                            .color(theme.text_secondary),
+                    );
+                    let formatted_pin = if pin.len() == 6 {
+                        format!("{} {}", &pin[0..3], &pin[3..6])
+                    } else {
+                        pin
+                    };
+                    ui.label(
+                        RichText::new(formatted_pin)
+                            .size(34.0)
+                            .strong()
+                            .color(theme.accent),
+                    );
+
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new("Адрес компьютера в сети:")
+                            .size(11.5)
+                            .color(theme.text_secondary),
+                    );
+                    ui.label(
+                        RichText::new(&host_port)
+                            .size(15.0)
+                            .strong()
+                            .color(theme.text_primary),
+                    );
+
+                    ui.add_space(12.0);
+                    ui.label(
+                        RichText::new("Как подключиться:")
+                            .size(13.0)
+                            .strong()
+                            .color(theme.text_primary),
+                    );
+                    ui.label(
+                        RichText::new("1. Откройте NexDeck на телефоне\n2. Введите адрес и 6 цифр ПИН-кода\n3. Или вставьте скопированный код")
+                            .size(12.5)
+                            .color(theme.text_secondary),
+                    );
+
+                    ui.add_space(10.0);
+                    if secondary_button(ui, "Выпустить новый ПИН-код", theme).clicked() {
+                        self.state.agent_process.stop();
+                        self.state.connect_phone_one_click();
+                    }
+                });
+            });
+        } else {
+            ui.vertical_centered(|ui| {
+                ui.add_space(16.0);
+                ui.label(
+                    RichText::new("Генерация кода подключения…")
+                        .size(16.0)
+                        .strong()
+                        .color(theme.text_primary),
+                );
+                ui.add_space(8.0);
+                if primary_button(ui, "Создать ПИН и QR-код", theme).clicked() {
+                    self.state.connect_phone_one_click();
+                }
+            });
+        }
+    }
+
     fn draw_panels_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, theme: ThemePalette) {
-        // Top Panel Switcher & Actions Bar
-        fluent_card(ui, theme, |ui| {
+        // Top Bar: Screen Profile Switcher
+        fluent_card_compact(ui, theme, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(
-                    RichText::new("Профили панелей:")
+                    RichText::new("Экраны:")
                         .size(13.0)
                         .strong()
                         .color(theme.text_secondary),
                 );
 
-                let panel_headers: Vec<(usize, String, String, usize)> = self
+                let panel_headers: Vec<(usize, String, usize)> = self
                     .state
                     .deck
                     .panels
                     .iter()
                     .enumerate()
-                    .map(|(idx, panel)| {
-                        (
-                            idx,
-                            panel.id.clone(),
-                            panel.name.clone(),
-                            panel.widgets.len(),
-                        )
-                    })
+                    .map(|(idx, panel)| (idx, panel.name.clone(), panel.widgets.len()))
                     .collect();
 
-                for (idx, _id, name, widget_count) in panel_headers {
+                for (idx, name, widget_count) in panel_headers {
                     let selected = idx == self.state.selected_panel_idx;
                     let pill_label = format!("{name} ({widget_count})");
                     let btn =
@@ -586,96 +749,215 @@ impl NexDeckDesktopApp {
                 ui.separator();
                 ui.add(
                     egui::TextEdit::singleline(&mut self.state.new_panel_name)
-                        .hint_text("Имя новой панели…")
-                        .desired_width(140.0),
+                        .hint_text("Название нового экрана…")
+                        .desired_width(150.0),
                 );
-                if primary_button(ui, "+ Создать панель", theme).clicked() {
+                if primary_button(ui, "+ Новый экран", theme).clicked() {
                     self.state.add_panel();
                     self.force_resync_drafts();
                 }
 
-                let can_delete = self.state.deck.panels.len() > 1;
-                if can_delete && danger_button(ui, "Удалить панель", theme).clicked() {
+                if self.state.deck.panels.len() > 1
+                    && danger_button(ui, "Удалить экран", theme).clicked()
+                {
                     self.state.delete_selected_panel();
                     self.force_resync_drafts();
                 }
 
-                if secondary_button(ui, "{ } JSON Импорт/Экспорт", theme).clicked() {
-                    self.show_json_drawer = !self.show_json_drawer;
-                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if secondary_button(ui, "Сбросить по умолчанию", theme).clicked()
+                    {
+                        self.state.reset_deck_to_starter();
+                        self.force_resync_drafts();
+                    }
+                });
             });
         });
 
         ui.add_space(12.0);
 
-        // Two-column spacious layout: Left (Deck Canvas + Palette), Right (Inspector + Panel Meta)
+        // 3-Column Studio Workspace:
+        // Left (265px): Drag-and-Drop Catalog of Ready Widgets
+        // Center (Fluid): Realistic Smartphone Screen Mockup with Drag-and-Drop & Corner Resize
+        // Right (320px): Instant Property & Color Swatch Inspector
         let avail_w = ui.available_width();
-        let right_w = 350.0_f32.min(avail_w * 0.38);
-        let left_w = (avail_w - right_w - 16.0).max(320.0);
+        let avail_h = ui.available_height();
+        let left_w = 264.0_f32;
+        let right_w = 324.0_f32.min(avail_w * 0.34);
+        let center_w = (avail_w - left_w - right_w - 24.0).max(280.0);
 
         ui.horizontal_top(|ui| {
+            // LEFT: Ready-Made Widget Catalog (Click or Drag!)
             ui.allocate_ui_with_layout(
-                Vec2::new(left_w, ui.available_height()),
+                Vec2::new(left_w, avail_h),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    self.draw_preset_catalog(ui, theme);
+                },
+            );
+
+            ui.add_space(12.0);
+
+            // CENTER: Interactive Smartphone Screen Canvas
+            ui.allocate_ui_with_layout(
+                Vec2::new(center_w, avail_h),
                 Layout::top_down(Align::Min),
                 |ui| {
                     ScrollArea::vertical()
-                        .id_salt("panels_canvas_scroll")
+                        .id_salt("center_phone_scroll")
                         .show(ui, |ui| {
-                            self.draw_widget_palette(ui, theme);
-                            ui.add_space(12.0);
                             self.draw_grid_canvas(ui, ctx, theme);
-                            if self.show_json_drawer {
-                                ui.add_space(12.0);
-                                self.draw_json_section(ui, theme);
-                            }
                         });
                 },
             );
 
             ui.add_space(12.0);
 
+            // RIGHT: Instant Auto-Saving Inspector
             ui.allocate_ui_with_layout(
-                Vec2::new(right_w, ui.available_height()),
+                Vec2::new(right_w, avail_h),
                 Layout::top_down(Align::Min),
                 |ui| {
                     ScrollArea::vertical()
-                        .id_salt("panels_inspector_scroll")
+                        .id_salt("right_inspector_scroll")
                         .show(ui, |ui| {
                             self.draw_widget_inspector(ui, theme);
-                            ui.add_space(12.0);
+                            ui.add_space(10.0);
                             self.draw_panel_meta_section(ui, theme);
                         });
                 },
             );
         });
+
+        // Floating Ghost Preview while dragging with the mouse
+        if let Some(drag) = &self.active_drag
+            && let Some(pos) = ctx.pointer_interact_pos()
+        {
+            ctx.set_cursor_icon(CursorIcon::Grabbing);
+            let (label, accent) = match drag {
+                DragPayload::CatalogPreset(preset) => (preset.title().to_owned(), theme.accent),
+                DragPayload::MoveWidget {
+                    title, accent_hex, ..
+                } => (
+                    title.clone(),
+                    parse_hex_color(accent_hex).unwrap_or(theme.accent),
+                ),
+                DragPayload::ResizeWidget { .. } => ("Изменение размера…".to_owned(), theme.accent),
+            };
+
+            let ghost_rect =
+                Rect::from_center_size(pos + Vec2::new(14.0, 14.0), Vec2::new(150.0, 44.0));
+            let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::new("drag_ghost")));
+            painter.rect_filled(
+                ghost_rect,
+                CornerRadius::same(10),
+                Color32::from_rgba_unmultiplied(23, 30, 43, 230),
+            );
+            painter.rect_stroke(
+                ghost_rect,
+                CornerRadius::same(10),
+                Stroke::new(2.0_f32, accent),
+                StrokeKind::Inside,
+            );
+            painter.text(
+                ghost_rect.center(),
+                Align2::CENTER_CENTER,
+                label,
+                FontId::proportional(13.5),
+                Color32::WHITE,
+            );
+        }
     }
 
-    fn draw_widget_palette(&mut self, ui: &mut egui::Ui, theme: ThemePalette) {
+    fn draw_preset_catalog(&mut self, ui: &mut egui::Ui, theme: ThemePalette) {
         fluent_card(ui, theme, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("Палитра виджетов")
-                        .size(14.5)
-                        .strong()
-                        .color(theme.text_primary),
-                );
-                ui.label(
-                    RichText::new("— нажмите, чтобы разместить в первой свободной ячейке")
-                        .size(12.0)
-                        .color(theme.text_secondary),
-                );
-            });
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                for &kind in all_widget_kinds() {
-                    if secondary_button(ui, &format!("+ {}", widget_kind_label(kind)), theme)
-                        .clicked()
-                    {
-                        self.state.add_widget(kind);
-                        self.force_resync_drafts();
+            ui.label(
+                RichText::new("Каталог виджетов")
+                    .size(15.5)
+                    .strong()
+                    .color(theme.text_primary),
+            );
+            ui.label(
+                RichText::new("Перетащите мышью на экран или нажмите для добавления")
+                    .size(11.5)
+                    .color(theme.text_secondary),
+            );
+            ui.add_space(8.0);
+
+            ScrollArea::vertical()
+                .id_salt("preset_catalog_scroll")
+                .show(ui, |ui| {
+                    for &preset in WidgetPreset::all() {
+                        let desired = Vec2::new(ui.available_width(), 48.0);
+                        let (rect, response) =
+                            ui.allocate_exact_size(desired, Sense::click_and_drag());
+
+                        let painter = ui.painter_at(rect);
+                        let bg = if response.hovered() {
+                            theme.accent_soft_bg
+                        } else {
+                            theme.card_elevated_bg
+                        };
+                        let border = if response.hovered() {
+                            theme.accent
+                        } else {
+                            theme.subtle_border
+                        };
+                        painter.rect_filled(rect, CornerRadius::same(10), bg);
+                        painter.rect_stroke(
+                            rect,
+                            CornerRadius::same(10),
+                            Stroke::new(1.0_f32, border),
+                            StrokeKind::Inside,
+                        );
+
+                        // Vector icon box on the left
+                        let icon_rect = Rect::from_min_size(
+                            rect.left_top() + Vec2::new(8.0, 8.0),
+                            Vec2::new(32.0, 32.0),
+                        );
+                        painter.rect_filled(
+                            icon_rect,
+                            CornerRadius::same(8),
+                            Color32::from_rgba_unmultiplied(
+                                theme.accent.r(),
+                                theme.accent.g(),
+                                theme.accent.b(),
+                                34,
+                            ),
+                        );
+                        draw_vector_icon(&painter, icon_rect.center(), preset.icon(), theme.accent);
+
+                        painter.text(
+                            rect.left_top() + Vec2::new(48.0, 8.0),
+                            Align2::LEFT_TOP,
+                            preset.title(),
+                            FontId::proportional(13.5),
+                            theme.text_primary,
+                        );
+                        painter.text(
+                            rect.left_bottom() + Vec2::new(48.0, -7.0),
+                            Align2::LEFT_BOTTOM,
+                            preset.subtitle(),
+                            FontId::proportional(11.0),
+                            theme.text_secondary,
+                        );
+
+                        if response.hovered() {
+                            ui.ctx().set_cursor_icon(CursorIcon::Grab);
+                        }
+                        if response.drag_started() {
+                            self.active_drag = Some(DragPayload::CatalogPreset(preset));
+                        }
+                        if response.clicked() {
+                            self.state.add_preset_at(preset, self.selected_empty_cell);
+                            self.selected_empty_cell = None;
+                            self.force_resync_drafts();
+                        }
+
+                        ui.add_space(6.0);
                     }
-                }
-            });
+                });
         });
     }
 
@@ -692,47 +974,79 @@ impl NexDeckDesktopApp {
                 .map(|w| w.row.saturating_add(w.row_span))
                 .max()
                 .unwrap_or(GRID_MIN_ROWS);
-            let rows = max_bottom.max(GRID_MIN_ROWS);
+            let rows = (max_bottom + 1).max(GRID_MIN_ROWS + 1);
 
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new(format!("Холст панели «{}»", panel.name))
+                    RichText::new(format!("Экран «{}»", panel.name))
                         .size(15.5)
                         .strong()
                         .color(theme.text_primary),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(
-                        RichText::new(format!(
-                            "Сетка {cols}×{rows} • Обновление {} мс",
-                            panel.refresh_interval_ms
-                        ))
-                        .size(12.0)
+                        RichText::new(
+                            "Перетаскивайте плитки мышью • Тяните правый нижний угол для размера",
+                        )
+                        .size(11.5)
                         .color(theme.text_secondary),
                     );
                 });
             });
-            ui.add_space(8.0);
+            ui.add_space(10.0);
 
-            let avail_width = ui.available_width().max(280.0);
+            let avail_width = ui.available_width().max(260.0);
+            let bezel_pad = 14.0_f32;
+            let inner_w = avail_width - bezel_pad * 2.0;
             let cell_w =
-                ((avail_width - GRID_CELL_GAP * f32::from(cols + 1)) / f32::from(cols)).max(54.0);
-            let cell_h = (cell_w * 0.72).clamp(64.0, 108.0);
-            let canvas_h = GRID_CELL_GAP + f32::from(rows) * (cell_h + GRID_CELL_GAP);
+                ((inner_w - GRID_CELL_GAP * f32::from(cols + 1)) / f32::from(cols)).max(52.0);
+            let cell_h = (cell_w * 0.78).clamp(68.0, 112.0);
+            let top_notch_h = 22.0_f32;
+            let grid_h = GRID_CELL_GAP + f32::from(rows) * (cell_h + GRID_CELL_GAP);
+            let phone_h = top_notch_h + grid_h + bezel_pad * 2.0;
 
-            let (canvas_rect, _) =
-                ui.allocate_exact_size(Vec2::new(avail_width, canvas_h), Sense::hover());
-            let painter = ui.painter_at(canvas_rect);
+            let (phone_rect, _) =
+                ui.allocate_exact_size(Vec2::new(avail_width, phone_h), Sense::hover());
+            let painter = ui.painter_at(phone_rect);
 
-            painter.rect_filled(canvas_rect, CornerRadius::same(12), theme.canvas_bg);
+            // Smartphone Outer Bezel
+            painter.rect_filled(phone_rect, CornerRadius::same(24), theme.sidebar_bg);
             painter.rect_stroke(
-                canvas_rect,
-                CornerRadius::same(12),
-                Stroke::new(1.0_f32, theme.subtle_border),
+                phone_rect,
+                CornerRadius::same(24),
+                Stroke::new(2.0_f32, theme.card_border),
                 StrokeKind::Inside,
             );
 
-            // Empty slot guides
+            // Speaker / Dynamic Island Pill at Top of Phone Bezel
+            let notch_rect = Rect::from_center_size(
+                Pos2::new(phone_rect.center().x, phone_rect.top() + 14.0),
+                Vec2::new(76.0, 6.0),
+            );
+            painter.rect_filled(notch_rect, CornerRadius::same(3), theme.card_border);
+
+            let canvas_rect = Rect::from_min_size(
+                Pos2::new(
+                    phone_rect.left() + bezel_pad,
+                    phone_rect.top() + bezel_pad + top_notch_h,
+                ),
+                Vec2::new(inner_w, grid_h),
+            );
+            painter.rect_filled(canvas_rect, CornerRadius::same(16), theme.canvas_bg);
+
+            let pointer_pos = ctx.pointer_interact_pos();
+            let hovered_cell: Option<(u16, u16)> = pointer_pos.and_then(|pos| {
+                if !canvas_rect.contains(pos) {
+                    return None;
+                }
+                let rel_x = (pos.x - canvas_rect.left() - GRID_CELL_GAP).max(0.0);
+                let rel_y = (pos.y - canvas_rect.top() - GRID_CELL_GAP).max(0.0);
+                let c = (rel_x / (cell_w + GRID_CELL_GAP)).floor() as u16;
+                let r = (rel_y / (cell_h + GRID_CELL_GAP)).floor() as u16;
+                Some((c.min(cols.saturating_sub(1)), r.min(rows.saturating_sub(1))))
+            });
+
+            // Empty Grid Slot Guides + Click-to-Select Empty Slot
             for row in 0..rows {
                 for col in 0..cols {
                     let x = canvas_rect.left()
@@ -742,16 +1056,121 @@ impl NexDeckDesktopApp {
                         + GRID_CELL_GAP
                         + f32::from(row) * (cell_h + GRID_CELL_GAP);
                     let cell_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(cell_w, cell_h));
+                    let is_sel_empty = self.selected_empty_cell == Some((col, row));
+
                     painter.rect_stroke(
                         cell_rect,
-                        CornerRadius::same(8),
-                        Stroke::new(1.0_f32, theme.subtle_border),
+                        CornerRadius::same(10),
+                        Stroke::new(
+                            if is_sel_empty { 1.8_f32 } else { 1.0_f32 },
+                            if is_sel_empty {
+                                theme.accent
+                            } else {
+                                theme.subtle_border
+                            },
+                        ),
                         StrokeKind::Inside,
                     );
+
+                    // Plus hint on empty selected slot
+                    if is_sel_empty {
+                        painter.text(
+                            cell_rect.center(),
+                            Align2::CENTER_CENTER,
+                            "+ Выберите виджет слева",
+                            FontId::proportional(10.5),
+                            theme.accent,
+                        );
+                    }
                 }
             }
 
+            // Draw Live Drop / Resize Target Preview when dragging
+            if let (Some(drag), Some((hc, hr))) = (&self.active_drag, hovered_cell) {
+                match drag {
+                    DragPayload::CatalogPreset(preset) => {
+                        let (raw_w, raw_h) = preset.default_spans();
+                        let w_span = raw_w.min(cols).max(1);
+                        let h_span = raw_h.max(1);
+                        let clamped_c = hc.min(cols.saturating_sub(w_span));
+                        let valid = self
+                            .state
+                            .can_drop_widget_at(None, clamped_c, hr, w_span, h_span);
+                        draw_drop_preview(
+                            &painter,
+                            canvas_rect,
+                            cell_w,
+                            cell_h,
+                            clamped_c,
+                            hr,
+                            w_span,
+                            h_span,
+                            valid,
+                            theme,
+                        );
+                    }
+                    DragPayload::MoveWidget {
+                        widget_id,
+                        col_span,
+                        row_span,
+                        ..
+                    } => {
+                        let clamped_c = hc.min(cols.saturating_sub(*col_span));
+                        let valid = self.state.can_drop_widget_at(
+                            Some(widget_id),
+                            clamped_c,
+                            hr,
+                            *col_span,
+                            *row_span,
+                        );
+                        draw_drop_preview(
+                            &painter,
+                            canvas_rect,
+                            cell_w,
+                            cell_h,
+                            clamped_c,
+                            hr,
+                            *col_span,
+                            *row_span,
+                            valid,
+                            theme,
+                        );
+                    }
+                    DragPayload::ResizeWidget {
+                        widget_id,
+                        origin_col,
+                        origin_row,
+                    } => {
+                        let new_w = hc.saturating_sub(*origin_col).saturating_add(1).max(1);
+                        let new_h = hr.saturating_sub(*origin_row).saturating_add(1).max(1);
+                        let valid = self.state.can_drop_widget_at(
+                            Some(widget_id),
+                            *origin_col,
+                            *origin_row,
+                            new_w,
+                            new_h,
+                        );
+                        draw_drop_preview(
+                            &painter,
+                            canvas_rect,
+                            cell_w,
+                            cell_h,
+                            *origin_col,
+                            *origin_row,
+                            new_w,
+                            new_h,
+                            valid,
+                            theme,
+                        );
+                    }
+                }
+            }
+
+            // Render Placed Widgets + Drag & Resize Handles
             let mut clicked_widget_id: Option<String> = None;
+            let mut delete_widget_id: Option<String> = None;
+            let mut started_drag: Option<DragPayload> = None;
+
             for widget in &panel.widgets {
                 let x = canvas_rect.left()
                     + GRID_CELL_GAP
@@ -765,19 +1184,42 @@ impl NexDeckDesktopApp {
                     + f32::from(widget.row_span.saturating_sub(1)) * GRID_CELL_GAP;
                 let base_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, h));
 
-                let id = ui.make_persistent_id(("widget_tile", &widget.id));
-                let response = ui.interact(base_rect, id, Sense::click());
+                // Corner resize handle rect (bottom-right 20x20)
+                let resize_rect = Rect::from_min_size(
+                    base_rect.right_bottom() - Vec2::new(20.0, 20.0),
+                    Vec2::new(20.0, 20.0),
+                );
+                // Delete button rect (top-right 20x20 when selected)
+                let delete_rect = Rect::from_min_size(
+                    Pos2::new(base_rect.right() - 22.0, base_rect.top() + 4.0),
+                    Vec2::new(18.0, 18.0),
+                );
+
                 let selected = self
                     .state
                     .selected_widget_id
                     .as_deref()
                     .is_some_and(|sel_id| sel_id == widget.id);
 
-                let hover_t =
-                    ctx.animate_bool_with_time(id.with("hover"), response.hovered(), 0.14);
-                let select_t = ctx.animate_bool_with_time(id.with("sel"), selected, 0.16);
-                let expand = hover_t * 1.5 + select_t * 1.0;
-                let rect = base_rect.expand(expand);
+                let resize_id = ui.make_persistent_id(("widget_resize", &widget.id));
+                let resize_resp = ui.interact(resize_rect, resize_id, Sense::drag());
+
+                let del_id = ui.make_persistent_id(("widget_del", &widget.id));
+                let del_resp = if selected {
+                    Some(ui.interact(delete_rect, del_id, Sense::click()))
+                } else {
+                    None
+                };
+
+                let tile_id = ui.make_persistent_id(("widget_tile", &widget.id));
+                let tile_resp = ui.interact(base_rect, tile_id, Sense::click_and_drag());
+
+                let hover_t = ctx.animate_bool_with_time(
+                    tile_id.with("hover"),
+                    tile_resp.hovered() || resize_resp.hovered(),
+                    0.14,
+                );
+                let rect = base_rect.expand(hover_t * 1.5);
 
                 let bg =
                     parse_hex_color(&widget.style.background_hex).unwrap_or(theme.card_elevated_bg);
@@ -792,8 +1234,8 @@ impl NexDeckDesktopApp {
                     radius,
                     Stroke::new(
                         if selected {
-                            2.2_f32
-                        } else if response.hovered() {
+                            2.4_f32
+                        } else if tile_resp.hovered() {
                             1.6_f32
                         } else {
                             1.0_f32
@@ -803,20 +1245,22 @@ impl NexDeckDesktopApp {
                     StrokeKind::Inside,
                 );
 
-                // Top type pill badge
-                painter.text(
-                    rect.right_top() + Vec2::new(-10.0, 8.0),
-                    Align2::RIGHT_TOP,
-                    widget_kind_label(widget.kind),
-                    FontId::proportional(10.5),
-                    Color32::from_rgba_unmultiplied(fg.r(), fg.g(), fg.b(), 165),
-                );
+                // Vector icon on the widget tile
+                if let Some(icon) = widget.icon {
+                    draw_vector_icon(
+                        &painter,
+                        rect.left_top() + Vec2::new(18.0, 18.0),
+                        icon,
+                        accent,
+                    );
+                }
 
+                let title_offset_x = if widget.icon.is_some() { 32.0 } else { 12.0 };
                 painter.text(
-                    rect.left_top() + Vec2::new(10.0, 10.0),
+                    rect.left_top() + Vec2::new(title_offset_x, 10.0),
                     Align2::LEFT_TOP,
                     &widget.title,
-                    FontId::proportional(f32::from(widget.style.font_size_sp).clamp(12.0, 17.0)),
+                    FontId::proportional(f32::from(widget.style.font_size_sp).clamp(12.0, 16.5)),
                     fg,
                 );
 
@@ -824,21 +1268,123 @@ impl NexDeckDesktopApp {
                     .telemetry
                     .map_or_else(|| action_label(widget.action), telemetry_label);
                 painter.text(
-                    rect.left_bottom() + Vec2::new(10.0, -10.0),
+                    rect.left_bottom() + Vec2::new(12.0, -10.0),
                     Align2::LEFT_BOTTOM,
                     subtitle,
                     FontId::proportional(11.5),
                     accent,
                 );
 
-                if response.clicked() {
+                // Draw delete button '×' when selected
+                if selected {
+                    painter.circle_filled(
+                        delete_rect.center(),
+                        8.0,
+                        Color32::from_rgba_unmultiplied(239, 68, 68, 210),
+                    );
+                    painter.text(
+                        delete_rect.center(),
+                        Align2::CENTER_CENTER,
+                        "×",
+                        FontId::proportional(13.0),
+                        Color32::WHITE,
+                    );
+                }
+
+                // Draw bottom-right corner resize grip lines
+                let rb = rect.right_bottom() - Vec2::new(5.0, 5.0);
+                let grip_color = if resize_resp.hovered() {
+                    theme.accent
+                } else {
+                    Color32::from_rgba_unmultiplied(fg.r(), fg.g(), fg.b(), 120)
+                };
+                painter.line_segment(
+                    [rb - Vec2::new(8.0, 0.0), rb - Vec2::new(0.0, 8.0)],
+                    Stroke::new(1.5_f32, grip_color),
+                );
+                painter.line_segment(
+                    [rb - Vec2::new(4.0, 0.0), rb - Vec2::new(0.0, 4.0)],
+                    Stroke::new(1.5_f32, grip_color),
+                );
+
+                if resize_resp.hovered() {
+                    ctx.set_cursor_icon(CursorIcon::ResizeNwSe);
+                } else if tile_resp.hovered() {
+                    ctx.set_cursor_icon(CursorIcon::Grab);
+                }
+
+                if let Some(dr) = del_resp
+                    && dr.clicked()
+                {
+                    delete_widget_id = Some(widget.id.clone());
+                } else if resize_resp.drag_started() {
+                    started_drag = Some(DragPayload::ResizeWidget {
+                        widget_id: widget.id.clone(),
+                        origin_col: widget.col,
+                        origin_row: widget.row,
+                    });
+                } else if tile_resp.drag_started() {
+                    started_drag = Some(DragPayload::MoveWidget {
+                        widget_id: widget.id.clone(),
+                        title: widget.title.clone(),
+                        col_span: widget.col_span,
+                        row_span: widget.row_span,
+                        accent_hex: widget.style.accent_hex.clone(),
+                    });
+                } else if tile_resp.clicked() {
                     clicked_widget_id = Some(widget.id.clone());
                 }
             }
 
-            if let Some(id) = clicked_widget_id {
+            if let Some(drag) = started_drag {
+                self.active_drag = Some(drag);
+            }
+
+            if let Some(del_id) = delete_widget_id {
+                self.state.select_widget(&del_id);
+                self.state.delete_selected_widget();
+                self.force_resync_drafts();
+            } else if let Some(id) = clicked_widget_id {
+                self.selected_empty_cell = None;
                 self.state.select_widget(&id);
                 self.force_resync_drafts();
+            } else if ctx.input(|i| i.pointer.primary_clicked())
+                && let Some((hc, hr)) = hovered_cell
+                && panel.widgets.iter().all(|w| {
+                    !(hc >= w.col
+                        && hc < w.col + w.col_span
+                        && hr >= w.row
+                        && hr < w.row + w.row_span)
+                })
+            {
+                self.selected_empty_cell = Some((hc, hr));
+            }
+
+            // Handle Drop when Mouse Button is Released over the Grid!
+            if ctx.input(|i| i.pointer.any_released())
+                && let Some(drag) = self.active_drag.take()
+                && let Some((hc, hr)) = hovered_cell
+            {
+                match drag {
+                    DragPayload::CatalogPreset(preset) => {
+                        self.state.add_preset_at(preset, Some((hc, hr)));
+                        self.force_resync_drafts();
+                    }
+                    DragPayload::MoveWidget { widget_id, .. } => {
+                        self.state.move_widget_to_cell(&widget_id, hc, hr);
+                        self.force_resync_drafts();
+                    }
+                    DragPayload::ResizeWidget {
+                        widget_id,
+                        origin_col,
+                        origin_row,
+                    } => {
+                        let new_w = hc.saturating_sub(origin_col).saturating_add(1).max(1);
+                        let new_h = hr.saturating_sub(origin_row).saturating_add(1).max(1);
+                        self.state.resize_widget_to_spans(&widget_id, new_w, new_h);
+                        self.force_resync_drafts();
+                    }
+                }
             }
         });
     }
@@ -847,7 +1393,7 @@ impl NexDeckDesktopApp {
         let Some(mut draft) = self.widget_draft.clone() else {
             fluent_card(ui, theme, |ui| {
                 ui.label(
-                    RichText::new("Инспектор виджета")
+                    RichText::new("Настройка виджета")
                         .size(15.5)
                         .strong()
                         .color(theme.text_primary),
@@ -855,7 +1401,7 @@ impl NexDeckDesktopApp {
                 ui.add_space(4.0);
                 ui.label(
                     RichText::new(
-                        "Выберите любой элемент на холсте слева или добавьте новый из палитры.",
+                        "Нажмите на любой виджет на экране смартфона, чтобы изменить его название, цвет или действие.",
                     )
                     .color(theme.text_secondary),
                 );
@@ -863,40 +1409,64 @@ impl NexDeckDesktopApp {
             return;
         };
 
-        let mut apply_edit = false;
-        let mut move_delta: Option<(i32, i32)> = None;
-        let mut resize_delta: Option<(i32, i32)> = None;
+        let original_spec = draft.spec.clone();
         let mut delete_clicked = false;
 
         fluent_card(ui, theme, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new("Свойства виджета")
+                    RichText::new("Настройка виджета")
                         .size(15.5)
                         .strong()
                         .color(theme.text_primary),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(format!("#{}", draft.spec.id))
-                            .size(11.5)
-                            .color(theme.text_secondary),
-                    );
+                    if danger_button(ui, "Удалить", theme).clicked() {
+                        delete_clicked = true;
+                    }
                 });
             });
             ui.add_space(8.0);
 
-            egui::Grid::new("inspector_main_grid")
+            ui.label(
+                RichText::new("Название на экране")
+                    .size(12.0)
+                    .color(theme.text_secondary),
+            );
+            ui.add(egui::TextEdit::singleline(&mut draft.spec.title).desired_width(f32::INFINITY));
+
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("Готовые цветовые темы (в 1 клик)")
+                    .size(12.0)
+                    .color(theme.text_secondary),
+            );
+            ui.horizontal_wrapped(|ui| {
+                for swatch in COLOR_SWATCHES {
+                    let accent_col = parse_hex_color(swatch.accent_hex).unwrap_or(theme.accent);
+                    let is_active = draft
+                        .spec
+                        .style
+                        .accent_hex
+                        .eq_ignore_ascii_case(swatch.accent_hex);
+                    let (r, resp) = ui.allocate_exact_size(Vec2::new(26.0, 26.0), Sense::click());
+                    let p = ui.painter_at(r);
+                    p.circle_filled(r.center(), 11.0, accent_col);
+                    if is_active {
+                        p.circle_stroke(r.center(), 12.5, Stroke::new(2.0_f32, Color32::WHITE));
+                    }
+                    if resp.on_hover_text(swatch.name).clicked() {
+                        draft.spec.style.background_hex = swatch.bg_hex.to_owned();
+                        draft.spec.style.accent_hex = swatch.accent_hex.to_owned();
+                    }
+                }
+            });
+
+            ui.add_space(8.0);
+            egui::Grid::new("inspector_simple_grid")
                 .num_columns(2)
                 .spacing([10.0, 8.0])
                 .show(ui, |ui| {
-                    ui.label("Заголовок:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut draft.spec.title)
-                            .desired_width(f32::INFINITY),
-                    );
-                    ui.end_row();
-
                     ui.label("Тип:");
                     egui::ComboBox::from_id_salt("widget_kind_combo")
                         .selected_text(widget_kind_label(draft.spec.kind))
@@ -911,12 +1481,12 @@ impl NexDeckDesktopApp {
                         });
                     ui.end_row();
 
-                    ui.label("Телеметрия:");
-                    let selected_label = draft.spec.telemetry.map_or("Нет", telemetry_label);
+                    ui.label("Датчик ПК:");
+                    let selected_label = draft.spec.telemetry.map_or("Не выбран", telemetry_label);
                     egui::ComboBox::from_id_salt("widget_telemetry_combo")
                         .selected_text(selected_label)
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut draft.spec.telemetry, None, "Нет");
+                            ui.selectable_value(&mut draft.spec.telemetry, None, "Не выбран");
                             for &metric in all_telemetry_bindings() {
                                 ui.selectable_value(
                                     &mut draft.spec.telemetry,
@@ -927,7 +1497,7 @@ impl NexDeckDesktopApp {
                         });
                     ui.end_row();
 
-                    ui.label("Действие:");
+                    ui.label("При нажатии:");
                     egui::ComboBox::from_id_salt("widget_action_combo")
                         .selected_text(action_label(draft.spec.action))
                         .show_ui(ui, |ui| {
@@ -970,137 +1540,36 @@ impl NexDeckDesktopApp {
                 };
             }
 
-            if matches!(draft.spec.kind, WidgetKind::Image) {
-                ui.add_space(6.0);
-                let mut key = draft.spec.asset_key.clone().unwrap_or_default();
-                ui.horizontal(|ui| {
-                    ui.label("Ключ ресурса:");
-                    ui.text_edit_singleline(&mut key);
-                });
-                draft.spec.asset_key = if key.trim().is_empty() {
-                    None
-                } else {
-                    Some(key)
-                };
-            }
-
-            if matches!(draft.spec.kind, WidgetKind::Custom) {
-                ui.add_space(6.0);
-                let mut comp = draft.spec.custom_component.clone().unwrap_or_default();
-                ui.horizontal(|ui| {
-                    ui.label("ID плагина:");
-                    ui.text_edit_singleline(&mut comp);
-                });
-                draft.spec.custom_component = if comp.trim().is_empty() {
-                    None
-                } else {
-                    Some(comp)
-                };
-            }
-
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(6.0);
-
-            ui.label(
-                RichText::new(format!(
-                    "Геометрия: колонка {}, строка {} • размер {}×{}",
-                    draft.spec.col, draft.spec.row, draft.spec.col_span, draft.spec.row_span
-                ))
-                .size(12.5)
-                .strong()
-                .color(theme.text_secondary),
-            );
+            ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.label("Позиция:");
-                if ui.button("◀").clicked() {
-                    move_delta = Some((-1, 0));
-                }
-                if ui.button("▶").clicked() {
-                    move_delta = Some((1, 0));
-                }
-                if ui.button("▲").clicked() {
-                    move_delta = Some((0, -1));
-                }
-                if ui.button("▼").clicked() {
-                    move_delta = Some((0, 1));
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.label("Ширина:");
-                if ui.button(" − ").clicked() {
-                    resize_delta = Some((-1, 0));
-                }
-                if ui.button(" + ").clicked() {
-                    resize_delta = Some((1, 0));
-                }
-                ui.label("Высота:");
-                if ui.button("−").clicked() {
-                    resize_delta = Some((0, -1));
-                }
-                if ui.button("+").clicked() {
-                    resize_delta = Some((0, 1));
-                }
-            });
-
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(6.0);
-
-            ui.label(
-                RichText::new("Цвета и стиль плитки")
-                    .size(13.0)
-                    .strong()
-                    .color(theme.text_primary),
-            );
-            draw_color_row(ui, "Фон:", &mut draft.spec.style.background_hex);
-            draw_color_row(ui, "Текст:", &mut draft.spec.style.foreground_hex);
-            draw_color_row(ui, "Акцент:", &mut draft.spec.style.accent_hex);
-
-            ui.horizontal(|ui| {
-                ui.label("Шрифт (sp):");
+                ui.label("Размер текста:");
                 ui.add(egui::Slider::new(
                     &mut draft.spec.style.font_size_sp,
-                    10..=48,
+                    11..=28,
                 ));
             });
             ui.horizontal(|ui| {
-                ui.label("Скругление:");
+                ui.label("Скругление углов:");
                 ui.add(egui::Slider::new(
                     &mut draft.spec.style.corner_radius,
-                    0..=32,
+                    4..=24,
                 ));
             });
 
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                if primary_button(ui, "Применить изменения", theme).clicked() {
-                    apply_edit = true;
-                }
-                if secondary_button(ui, "Сбросить стиль", theme).clicked() {
-                    draft.spec.style = WidgetStyle::default();
-                }
+            ui.collapsing("Точная настройка цветов", |ui| {
+                draw_color_row(ui, "Фон:", &mut draft.spec.style.background_hex);
+                draw_color_row(ui, "Текст:", &mut draft.spec.style.foreground_hex);
+                draw_color_row(ui, "Акцент:", &mut draft.spec.style.accent_hex);
             });
-            ui.add_space(4.0);
-            if danger_button(ui, "Удалить виджет с панели", theme).clicked() {
-                delete_clicked = true;
-            }
         });
 
-        self.widget_draft = Some(draft.clone());
-
-        if let Some((dx, dy)) = move_delta {
-            self.state.move_selected_widget(dx, dy);
-            self.force_resync_drafts();
-        } else if let Some((dw, dh)) = resize_delta {
-            self.state.resize_selected_widget(dw, dh);
-            self.force_resync_drafts();
-        } else if delete_clicked {
+        if delete_clicked {
             self.state.delete_selected_widget();
             self.force_resync_drafts();
-        } else if apply_edit {
-            self.state.update_selected_widget(draft.spec);
-            self.force_resync_drafts();
+        } else if draft.spec != original_spec {
+            // Instant auto-save on any change!
+            self.state.update_selected_widget(draft.spec.clone());
+            self.widget_draft = Some(draft);
         }
     }
 
@@ -1108,276 +1577,81 @@ impl NexDeckDesktopApp {
         let Some(mut draft) = self.panel_meta_draft.clone() else {
             return;
         };
-        let mut save_clicked = false;
-        let mut reset_starter = false;
+        let original = draft.clone();
 
         fluent_card(ui, theme, |ui| {
             ui.label(
-                RichText::new("Параметры текущей панели")
+                RichText::new("Размер сетки экрана")
                     .size(14.5)
                     .strong()
                     .color(theme.text_primary),
             );
             ui.add_space(6.0);
-            egui::Grid::new("panel_meta_grid")
-                .num_columns(2)
-                .spacing([10.0, 8.0])
-                .show(ui, |ui| {
-                    ui.label("Название:");
-                    ui.text_edit_singleline(&mut draft.name);
-                    ui.end_row();
-
-                    ui.label("Колонок:");
-                    ui.add(
-                        egui::Slider::new(
-                            &mut draft.columns,
-                            MIN_PANEL_COLUMNS..=MAX_PANEL_COLUMNS,
-                        )
-                        .clamping(egui::SliderClamping::Always),
-                    );
-                    ui.end_row();
-
-                    ui.label("Интервал (мс):");
-                    ui.add(
-                        egui::DragValue::new(&mut draft.refresh_interval_ms)
-                            .speed(50)
-                            .range(MIN_REFRESH_INTERVAL_MS..=MAX_REFRESH_INTERVAL_MS),
-                    );
-                    ui.end_row();
-                });
-
-            ui.add_space(8.0);
             ui.horizontal(|ui| {
-                save_clicked = primary_button(ui, "Сохранить панель", theme).clicked();
-                reset_starter = secondary_button(ui, "Сбросить Deck", theme).clicked();
+                ui.label("Имя экрана:");
+                ui.text_edit_singleline(&mut draft.name);
+            });
+            ui.horizontal(|ui| {
+                ui.label("Колонок по ширине:");
+                ui.add(
+                    egui::Slider::new(&mut draft.columns, MIN_PANEL_COLUMNS..=MAX_PANEL_COLUMNS)
+                        .clamping(egui::SliderClamping::Always),
+                );
             });
         });
 
-        self.panel_meta_draft = Some(draft.clone());
-        if save_clicked {
+        if draft != original && !draft.name.trim().is_empty() {
             self.state.update_selected_panel_meta(
-                draft.name,
+                draft.name.clone(),
                 draft.columns,
                 draft.refresh_interval_ms,
             );
-            self.panel_meta_draft = None;
-            self.sync_drafts_from_selection();
-        } else if reset_starter {
-            self.state.reset_deck_to_starter();
-            self.force_resync_drafts();
+            self.panel_meta_draft = Some(draft);
         }
     }
 
-    fn draw_json_section(&mut self, ui: &mut egui::Ui, theme: ThemePalette) {
-        fluent_card(ui, theme, |ui| {
-            ui.label(
-                RichText::new("Прямой JSON-редактор (panels.json)")
-                    .size(14.5)
-                    .strong()
-                    .color(theme.text_primary),
-            );
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                if secondary_button(ui, "Выгрузить всю деку", theme).clicked() {
-                    self.state.export_deck_to_buffer();
-                }
-                if secondary_button(ui, "Выгрузить текущую панель", theme).clicked()
-                {
-                    self.state.export_selected_panel_to_buffer();
-                }
-                if primary_button(ui, "Импортировать деку", theme).clicked() {
-                    self.state.import_deck_from_buffer();
-                    self.force_resync_drafts();
-                }
-                if primary_button(ui, "Импортировать панель", theme).clicked() {
-                    self.state.import_panel_from_buffer();
-                    self.force_resync_drafts();
-                }
-            });
-            ui.add_space(6.0);
-            ScrollArea::vertical()
-                .id_salt("panel_json_editor")
-                .max_height(180.0)
-                .show(ui, |ui| {
-                    ui.add(
-                        egui::TextEdit::multiline(&mut self.state.json_buffer)
-                            .code_editor()
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(7),
-                    );
-                });
-        });
-    }
-
-    fn draw_agent_tab(
+    fn draw_connection_tab(
         &mut self,
         ui: &mut egui::Ui,
         ctx: &egui::Context,
         running: bool,
         theme: ThemePalette,
     ) {
-        // KPI Summary Row
-        ui.columns(3, |cols| {
-            fluent_card(&mut cols[0], theme, |ui| {
-                ui.label(
-                    RichText::new("Состояние nexdeck-agent")
-                        .size(12.0)
-                        .color(theme.text_secondary),
-                );
-                let (txt, col) = if running {
-                    if self.state.agent_process.is_pair_mode() {
-                        ("Ожидание сопряжения (PIN)", theme.accent)
-                    } else {
-                        ("Активен в фоне (без окна)", theme.status_ok)
-                    }
-                } else {
-                    ("Остановлен", theme.status_warn)
-                };
-                ui.label(RichText::new(txt).size(16.0).strong().color(col));
-            });
+        ScrollArea::vertical()
+            .id_salt("connection_tab_scroll")
+            .show(ui, |ui| {
+                // Hero Card: Visual QR Code & 6-Digit PIN
+                fluent_card(ui, theme, |ui| {
+                    self.draw_pairing_card_contents(ui, ctx, theme);
+                });
 
-            fluent_card(&mut cols[1], theme, |ui| {
-                ui.label(
-                    RichText::new("Сетевой шлюз (WSS + Universal API)")
-                        .size(12.0)
-                        .color(theme.text_secondary),
-                );
-                ui.label(
-                    RichText::new(&self.state.settings_draft.bind_addr)
-                        .size(16.0)
-                        .strong()
-                        .color(theme.text_primary),
-                );
-            });
+                ui.add_space(14.0);
 
-            fluent_card(&mut cols[2], theme, |ui| {
-                ui.label(
-                    RichText::new("Автозапуск с Windows 11")
-                        .size(12.0)
-                        .color(theme.text_secondary),
-                );
-                let (txt, col) = if self.state.autostart_command.is_some() {
-                    ("Включён (HKCU\\Run)", theme.status_ok)
-                } else {
-                    ("Отключён", theme.text_secondary)
-                };
-                ui.label(RichText::new(txt).size(16.0).strong().color(col));
-            });
-        });
-
-        ui.add_space(14.0);
-
-        ui.columns(2, |columns| {
-            ScrollArea::vertical()
-                .id_salt("agent_left_col")
-                .show(&mut columns[0], |ui| {
-                    fluent_card(ui, theme, |ui| {
-                        ui.label(
-                            RichText::new("Мастер подключения телефона")
-                                .size(15.5)
-                                .strong()
-                                .color(theme.text_primary),
-                        );
-                        ui.label(
-                            RichText::new(
-                                "Агент запускается в фоновом режиме без открытия чёрного окна командной строки.",
-                            )
-                            .size(12.5)
-                            .color(theme.text_secondary),
-                        );
-                        ui.add_space(8.0);
-
-                        ui.horizontal(|ui| {
-                            ui.label("Время жизни PIN-кода (сек):");
-                            ui.add(
-                                egui::DragValue::new(&mut self.state.pair_ttl_secs)
-                                    .speed(10)
-                                    .range(30..=1800),
+                // Simple Autostart & Background Mode Card
+                fluent_card(ui, theme, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new("Автозапуск вместе с Windows")
+                                    .size(15.5)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            ui.label(
+                                RichText::new(
+                                    "NexDeck будет автоматически запускаться в фоне при включении компьютера без лишних окон.",
+                                )
+                                .size(12.5)
+                                .color(theme.text_secondary),
                             );
                         });
-                        ui.add_space(6.0);
-                        ui.horizontal_wrapped(|ui| {
-                            if !running {
-                                if primary_button(ui, "🔗 Запустить с PIN и QR", theme).clicked() {
-                                    self.state.start_agent(true);
-                                }
-                                if secondary_button(ui, "▶ Обычный запуск", theme).clicked() {
-                                    self.state.start_agent(false);
-                                }
-                            } else if danger_button(ui, "■ Остановить агент", theme).clicked() {
-                                self.state.stop_agent();
-                            }
-                        });
-                        if let Some(note) = self.state.agent_process.last_exit_note() {
-                            ui.add_space(4.0);
-                            ui.label(RichText::new(note).size(12.0).color(theme.text_secondary));
-                        }
-
-                        let (pin_opt, pairing_json_opt) =
-                            self.state.agent_process.latest_pairing_info();
-                        if let Some(pin) = pin_opt {
-                            ui.add_space(10.0);
-                            egui::Frame::new()
-                                .fill(theme.accent_soft_bg)
-                                .stroke(Stroke::new(1.0_f32, theme.accent))
-                                .corner_radius(CornerRadius::same(10))
-                                .inner_margin(Margin::symmetric(16, 12))
-                                .show(ui, |ui| {
-                                    ui.label(
-                                        RichText::new("Одноразовый PIN-код сопряжения")
-                                            .size(12.0)
-                                            .color(theme.text_secondary),
-                                    );
-                                    ui.label(
-                                        RichText::new(pin)
-                                            .size(28.0)
-                                            .strong()
-                                            .color(theme.accent),
-                                    );
-                                });
-                        }
-                        if let Some(json) = pairing_json_opt {
-                            ui.add_space(8.0);
-                            if primary_button(ui, "Скопировать JSON для мобильного клиента", theme)
-                                .clicked()
-                            {
-                                ctx.copy_text(json.clone());
-                            }
-                            let mut preview = json;
-                            ui.add(
-                                egui::TextEdit::multiline(&mut preview)
-                                    .code_editor()
-                                    .desired_width(f32::INFINITY)
-                                    .desired_rows(5),
-                            );
-                        }
-                    });
-
-                    ui.add_space(12.0);
-                    fluent_card(ui, theme, |ui| {
-                        ui.label(
-                            RichText::new("Автозапуск при входе в систему (без UAC)")
-                                .size(15.5)
-                                .strong()
-                                .color(theme.text_primary),
-                        );
-                        ui.add_space(4.0);
-                        if let Some(cmd) = &self.state.autostart_command {
-                            ui.monospace(cmd);
-                        }
-                        if let Some(note) = &self.state.autostart_note {
-                            ui.label(RichText::new(note).size(12.0).color(theme.text_secondary));
-                        }
-                        ui.add_space(6.0);
-                        ui.horizontal(|ui| {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let enabled = self.state.autostart_command.is_some();
-                            if !enabled
-                                && primary_button(ui, "Включить автозапуск", theme).clicked()
+                            if !enabled && primary_button(ui, "Включить автозапуск", theme).clicked()
                             {
                                 self.state.set_autostart_enabled(true);
-                            }
-                            if enabled
-                                && danger_button(ui, "Отключить автозапуск", theme).clicked()
+                            } else if enabled
+                                && secondary_button(ui, "Отключить автозапуск", theme).clicked()
                             {
                                 self.state.set_autostart_enabled(false);
                             }
@@ -1385,87 +1659,49 @@ impl NexDeckDesktopApp {
                     });
                 });
 
-            ScrollArea::vertical()
-                .id_salt("agent_right_col")
-                .show(&mut columns[1], |ui| {
-                    fluent_card(ui, theme, |ui| {
-                        ui.label(
-                            RichText::new("Параметры сервера (config.json)")
-                                .size(15.5)
-                                .strong()
-                                .color(theme.text_primary),
-                        );
-                        ui.add_space(8.0);
-                        egui::Grid::new("config_settings_grid")
-                            .num_columns(2)
-                            .spacing([12.0, 8.0])
-                            .show(ui, |ui| {
-                                ui.label("Адрес и порт WSS:");
-                                ui.text_edit_singleline(&mut self.state.settings_draft.bind_addr);
-                                ui.end_row();
+                ui.add_space(14.0);
 
-                                ui.label("SAN хосты (TLS):");
-                                ui.text_edit_singleline(
-                                    &mut self.state.settings_draft.san_hosts_csv,
-                                );
-                                ui.end_row();
+                // Collapsible Advanced / Developer section (keeps technical fields out of sight by default)
+                fluent_card_compact(ui, theme, |ui| {
+                    if ui
+                        .selectable_label(
+                            self.show_advanced_settings,
+                            "Расширенные сетевые настройки и журнал сервера ▾",
+                        )
+                        .clicked()
+                    {
+                        self.show_advanced_settings = !self.show_advanced_settings;
+                    }
 
-                                ui.label("Опрос телеметрии (мс):");
-                                ui.text_edit_singleline(
-                                    &mut self.state.settings_draft.poll_interval_ms,
-                                );
-                                ui.end_row();
-
-                                ui.label("Буфер уведомлений:");
-                                ui.text_edit_singleline(
-                                    &mut self.state.settings_draft.notification_queue_capacity,
-                                );
-                                ui.end_row();
-                            });
-
-                        ui.add_space(8.0);
-                        ui.checkbox(
-                            &mut self.state.settings_draft.enable_plugins,
-                            "Разрешить изолированный WASM-движок плагинов",
-                        );
+                    if self.show_advanced_settings {
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
-                            if primary_button(ui, "Сохранить настройки", theme).clicked() {
+                            ui.label("Сетевой порт и адрес:");
+                            ui.text_edit_singleline(&mut self.state.settings_draft.bind_addr);
+                            if primary_button(ui, "Сохранить", theme).clicked() {
                                 self.state.save_settings_draft();
                             }
-                            if secondary_button(ui, "Сбросить", theme).clicked() {
-                                self.state.reset_settings_draft();
+                            if running && danger_button(ui, "Остановить сервер", theme).clicked() {
+                                self.state.stop_agent();
                             }
                         });
-                    });
-
-                    ui.add_space(12.0);
-                    fluent_card(ui, theme, |ui| {
-                        ui.label(
-                            RichText::new("Журнал событий агента")
-                                .size(15.5)
-                                .strong()
-                                .color(theme.text_primary),
-                        );
-                        ui.add_space(6.0);
+                        if let Some(note) = self.state.agent_process.last_exit_note() {
+                            ui.label(RichText::new(note).size(11.5).color(theme.text_secondary));
+                        }
                         let lines = self.state.agent_process.log_lines();
-                        if lines.is_empty() {
-                            ui.label(
-                                RichText::new("Журнал пуст — запустите агент слева.")
-                                    .color(theme.text_secondary),
-                            );
-                        } else {
+                        if !lines.is_empty() {
+                            ui.add_space(6.0);
                             let mut combined = lines.join("\n");
                             ui.add(
                                 egui::TextEdit::multiline(&mut combined)
                                     .code_editor()
                                     .desired_width(f32::INFINITY)
-                                    .desired_rows(12),
+                                    .desired_rows(6),
                             );
                         }
-                    });
+                    }
                 });
-        });
+            });
     }
 
     fn draw_devices_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, theme: ThemePalette) {
@@ -1473,40 +1709,17 @@ impl NexDeckDesktopApp {
             .id_salt("devices_tab_scroll")
             .show(ui, |ui| {
                 fluent_card(ui, theme, |ui| {
-                    ui.label(
-                        RichText::new("Криптографический отпечаток хоста (TLS SHA-256 Pinning)")
-                            .size(15.5)
-                            .strong()
-                            .color(theme.text_primary),
-                    );
-                    ui.add_space(4.0);
-                    ui.monospace(&self.state.tls_fingerprint_sha256);
-                    ui.add_space(8.0);
-                    ui.horizontal_wrapped(|ui| {
-                        if primary_button(ui, "Скопировать отпечаток", theme).clicked()
-                        {
-                            ctx.copy_text(self.state.tls_fingerprint_sha256.clone());
-                        }
-                        if danger_button(ui, "Перевыпустить TLS-сертификат", theme).clicked()
-                        {
-                            self.state.rotate_tls_identity();
-                        }
-                    });
-                });
-
-                ui.add_space(12.0);
-                fluent_card(ui, theme, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(
                             RichText::new(format!(
-                                "Доверенные мобильные устройства ({})",
+                                "Подключённые телефоны ({})",
                                 self.state.devices.len()
                             ))
                             .size(15.5)
                             .strong()
                             .color(theme.text_primary),
                         );
-                        if secondary_button(ui, "↻ Обновить", theme).clicked() {
+                        if secondary_button(ui, "Обновить список", theme).clicked() {
                             self.state.refresh_from_disk();
                         }
                     });
@@ -1514,8 +1727,10 @@ impl NexDeckDesktopApp {
 
                     if self.state.devices.is_empty() {
                         ui.label(
-                            RichText::new("Сопряжённых телефонов пока нет.")
-                                .color(theme.text_secondary),
+                            RichText::new(
+                                "Пока нет привязанных телефонов. Нажмите «Подключить телефон» слева.",
+                            )
+                            .color(theme.text_secondary),
                         );
                     } else {
                         let mut revoke_target: Option<String> = None;
@@ -1523,33 +1738,20 @@ impl NexDeckDesktopApp {
                             egui::Frame::new()
                                 .fill(theme.card_elevated_bg)
                                 .stroke(Stroke::new(1.0_f32, theme.subtle_border))
-                                .corner_radius(CornerRadius::same(8))
-                                .inner_margin(Margin::symmetric(12, 8))
+                                .corner_radius(CornerRadius::same(10))
+                                .inner_margin(Margin::symmetric(14, 10))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        ui.vertical(|ui| {
-                                            ui.label(
-                                                RichText::new(format!(
-                                                    "{} ({})",
-                                                    record.device_name, record.device_id
-                                                ))
+                                        ui.label(
+                                            RichText::new(&record.device_name)
+                                                .size(14.5)
                                                 .strong()
                                                 .color(theme.text_primary),
-                                            );
-                                            ui.label(
-                                                RichText::new(format!(
-                                                    "SHA-256 токена: {}…",
-                                                    &record.token_hash_sha256
-                                                        [..record.token_hash_sha256.len().min(16)]
-                                                ))
-                                                .size(11.5)
-                                                .color(theme.text_secondary),
-                                            );
-                                        });
+                                        );
                                         ui.with_layout(
                                             Layout::right_to_left(Align::Center),
                                             |ui| {
-                                                if danger_button(ui, "Отозвать доступ", theme)
+                                                if danger_button(ui, "Отключить телефон", theme)
                                                     .clicked()
                                                 {
                                                     revoke_target = Some(record.device_id.clone());
@@ -1580,30 +1782,27 @@ impl NexDeckDesktopApp {
         fluent_card(ui, theme, |ui| {
             ui.label(
                 RichText::new(format!(
-                    "Сторонние приложения Universal API ({}, clients.json)",
+                    "Внешние программы и плагины ({})",
                     self.state.api_clients.len()
                 ))
                 .size(15.5)
                 .strong()
                 .color(theme.text_primary),
             );
-            ui.add_space(6.0);
+            ui.label(
+                RichText::new(
+                    "Позволяет сторонним скриптам и приложениям присылать уведомления и запросы подтверждения на ваш телефон.",
+                )
+                .size(12.0)
+                .color(theme.text_secondary),
+            );
+            ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.label("Client ID:");
+                ui.label("ID программы:");
                 ui.text_edit_singleline(&mut self.state.new_api_client_id);
-                ui.label("Приложение:");
+                ui.label("Название:");
                 ui.text_edit_singleline(&mut self.state.new_api_client_name);
-            });
-            ui.add_space(4.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Разрешения:");
-                for (idx, perm) in ApiPermission::ALL.iter().copied().enumerate() {
-                    ui.checkbox(
-                        &mut self.state.new_api_client_permissions[idx],
-                        perm.as_str(),
-                    );
-                }
-                if primary_button(ui, "+ Выпустить токен клиента", theme).clicked()
+                if primary_button(ui, "+ Подключить программу", theme).clicked()
                 {
                     self.state.register_api_client();
                 }
@@ -1619,7 +1818,7 @@ impl NexDeckDesktopApp {
                     .show(ui, |ui| {
                         ui.label(
                             RichText::new(format!(
-                                "Одноразовый токен для '{}' (сохраните сейчас):",
+                                "Ключ доступа для '{}' (скопируйте сейчас):",
                                 issued.client_id
                             ))
                             .strong()
@@ -1627,11 +1826,11 @@ impl NexDeckDesktopApp {
                         );
                         ui.monospace(&issued.access_secret);
                         ui.horizontal(|ui| {
-                            if primary_button(ui, "Скопировать токен", theme).clicked()
+                            if primary_button(ui, "Скопировать ключ", theme).clicked()
                             {
                                 ctx.copy_text(issued.access_secret.clone());
                             }
-                            if secondary_button(ui, "Скрыть", theme).clicked() {
+                            if secondary_button(ui, "Готово", theme).clicked() {
                                 self.state.latest_issued_api_client = None;
                             }
                         });
@@ -1656,37 +1855,16 @@ impl NexDeckDesktopApp {
                                 } else {
                                     theme.status_ok
                                 };
-                                let perms_text = client
-                                    .permissions
-                                    .iter()
-                                    .map(|p| p.as_str())
-                                    .collect::<Vec<_>>()
-                                    .join(", ");
                                 ui.label(
-                                    RichText::new(format!(
-                                        "{} [{}] ({})",
-                                        client.application_name,
-                                        client.client_id,
-                                        if client.revoked {
-                                            "ОТОЗВАН"
-                                        } else {
-                                            "АКТИВЕН"
-                                        }
-                                    ))
-                                    .color(status_color)
-                                    .strong(),
-                                );
-                                ui.label(
-                                    RichText::new(format!("Права: [{perms_text}]"))
-                                        .size(12.0)
-                                        .color(theme.text_secondary),
+                                    RichText::new(&client.application_name)
+                                        .color(status_color)
+                                        .strong(),
                                 );
                                 if client.revoked {
-                                    if secondary_button(ui, "Восстановить", theme).clicked()
-                                    {
+                                    if secondary_button(ui, "Разрешить", theme).clicked() {
                                         toggle_revoke = Some((client.client_id.clone(), false));
                                     }
-                                } else if secondary_button(ui, "Отозвать", theme).clicked()
+                                } else if secondary_button(ui, "Заблокировать", theme).clicked()
                                 {
                                     toggle_revoke = Some((client.client_id.clone(), true));
                                 }
@@ -1709,12 +1887,222 @@ impl NexDeckDesktopApp {
     }
 }
 
+#[derive(Clone, Copy)]
+enum NavIconKind {
+    Grid,
+    Phone,
+    Shield,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_drop_preview(
+    painter: &egui::Painter,
+    canvas_rect: Rect,
+    cell_w: f32,
+    cell_h: f32,
+    col: u16,
+    row: u16,
+    col_span: u16,
+    row_span: u16,
+    valid: bool,
+    theme: ThemePalette,
+) {
+    let x = canvas_rect.left() + GRID_CELL_GAP + f32::from(col) * (cell_w + GRID_CELL_GAP);
+    let y = canvas_rect.top() + GRID_CELL_GAP + f32::from(row) * (cell_h + GRID_CELL_GAP);
+    let w = f32::from(col_span) * cell_w + f32::from(col_span.saturating_sub(1)) * GRID_CELL_GAP;
+    let h = f32::from(row_span) * cell_h + f32::from(row_span.saturating_sub(1)) * GRID_CELL_GAP;
+    let rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, h));
+    let color = if valid {
+        theme.accent
+    } else {
+        theme.status_err
+    };
+    painter.rect_filled(
+        rect,
+        CornerRadius::same(12),
+        Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 45),
+    );
+    painter.rect_stroke(
+        rect,
+        CornerRadius::same(12),
+        Stroke::new(2.2_f32, color),
+        StrokeKind::Inside,
+    );
+}
+
+fn draw_qr_code_widget(ui: &mut egui::Ui, payload: &str, box_size: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(box_size), Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, CornerRadius::same(14), Color32::WHITE);
+
+    let Some(qr) = QrMatrix::encode_bytes(payload.as_bytes()) else {
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            "QR",
+            FontId::proportional(18.0),
+            Color32::BLACK,
+        );
+        return;
+    };
+
+    let quiet = 3_usize;
+    let total_modules = qr.size() + quiet * 2;
+    let mod_px = rect.width() / (total_modules as f32);
+    let dark = Color32::from_rgb(15, 23, 42);
+
+    for y in 0..qr.size() {
+        for x in 0..qr.size() {
+            if qr.get(x, y) {
+                let min_x = rect.left() + ((x + quiet) as f32) * mod_px;
+                let min_y = rect.top() + ((y + quiet) as f32) * mod_px;
+                let m_rect = Rect::from_min_size(
+                    Pos2::new(min_x, min_y),
+                    Vec2::splat((mod_px + 0.35).ceil()),
+                );
+                painter.rect_filled(m_rect, CornerRadius::ZERO, dark);
+            }
+        }
+    }
+}
+
+/// Draws crisp anti-aliased geometric vector icons so no emoji font is required.
+fn draw_vector_icon(painter: &egui::Painter, center: Pos2, icon: WidgetIcon, color: Color32) {
+    let stroke = Stroke::new(1.8_f32, color);
+    match icon {
+        WidgetIcon::Cpu => {
+            let r = Rect::from_center_size(center, Vec2::splat(11.0));
+            painter.rect_stroke(r, CornerRadius::same(2), stroke, StrokeKind::Inside);
+            painter.rect_filled(
+                Rect::from_center_size(center, Vec2::splat(4.0)),
+                CornerRadius::same(1),
+                color,
+            );
+        }
+        WidgetIcon::Memory => {
+            let r = Rect::from_center_size(center, Vec2::new(14.0, 9.0));
+            painter.rect_stroke(r, CornerRadius::same(2), stroke, StrokeKind::Inside);
+            painter.line_segment(
+                [center - Vec2::new(3.0, 2.0), center - Vec2::new(3.0, -2.0)],
+                stroke,
+            );
+            painter.line_segment(
+                [center + Vec2::new(3.0, -2.0), center + Vec2::new(3.0, 2.0)],
+                stroke,
+            );
+        }
+        WidgetIcon::Gpu => {
+            let r = Rect::from_center_size(center, Vec2::new(14.0, 10.0));
+            painter.rect_stroke(r, CornerRadius::same(2), stroke, StrokeKind::Inside);
+            painter.circle_stroke(center, 2.8, stroke);
+        }
+        WidgetIcon::Network => {
+            painter.circle_filled(center + Vec2::new(0.0, 4.0), 1.8, color);
+            painter.circle_stroke(center + Vec2::new(0.0, 1.0), 4.5, stroke);
+        }
+        WidgetIcon::Battery => {
+            let r = Rect::from_center_size(center, Vec2::new(13.0, 8.0));
+            painter.rect_stroke(r, CornerRadius::same(2), stroke, StrokeKind::Inside);
+            painter.rect_filled(
+                Rect::from_min_size(r.left_top() + Vec2::new(2.0, 2.0), Vec2::new(6.0, 4.0)),
+                CornerRadius::same(1),
+                color,
+            );
+        }
+        WidgetIcon::PlayPause => {
+            let pts = vec![
+                center + Vec2::new(-4.0, -5.0),
+                center + Vec2::new(5.0, 0.0),
+                center + Vec2::new(-4.0, 5.0),
+            ];
+            painter.add(Shape::convex_polygon(pts, color, Stroke::NONE));
+        }
+        WidgetIcon::NextTrack => {
+            painter.line_segment(
+                [center + Vec2::new(-4.0, -4.5), center + Vec2::new(2.0, 0.0)],
+                stroke,
+            );
+            painter.line_segment(
+                [center + Vec2::new(2.0, 0.0), center + Vec2::new(-4.0, 4.5)],
+                stroke,
+            );
+            painter.line_segment(
+                [center + Vec2::new(4.0, -4.5), center + Vec2::new(4.0, 4.5)],
+                stroke,
+            );
+        }
+        WidgetIcon::PreviousTrack => {
+            painter.line_segment(
+                [center + Vec2::new(4.0, -4.5), center + Vec2::new(-2.0, 0.0)],
+                stroke,
+            );
+            painter.line_segment(
+                [center + Vec2::new(-2.0, 0.0), center + Vec2::new(4.0, 4.5)],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    center + Vec2::new(-4.0, -4.5),
+                    center + Vec2::new(-4.0, 4.5),
+                ],
+                stroke,
+            );
+        }
+        WidgetIcon::VolumeUp => {
+            painter.line_segment(
+                [center + Vec2::new(-5.0, 0.0), center + Vec2::new(5.0, 0.0)],
+                stroke,
+            );
+            painter.line_segment(
+                [center + Vec2::new(0.0, -5.0), center + Vec2::new(0.0, 5.0)],
+                stroke,
+            );
+        }
+        WidgetIcon::VolumeDown => {
+            painter.line_segment(
+                [center + Vec2::new(-5.0, 0.0), center + Vec2::new(5.0, 0.0)],
+                stroke,
+            );
+        }
+        WidgetIcon::VolumeMute => {
+            painter.line_segment(
+                [center + Vec2::new(-4.5, -4.5), center + Vec2::new(4.5, 4.5)],
+                stroke,
+            );
+            painter.line_segment(
+                [center + Vec2::new(4.5, -4.5), center + Vec2::new(-4.5, 4.5)],
+                stroke,
+            );
+        }
+        _ => {
+            let r = Rect::from_center_size(center, Vec2::splat(10.0));
+            painter.rect_stroke(r, CornerRadius::same(3), stroke, StrokeKind::Inside);
+        }
+    }
+}
+
 fn fluent_card(ui: &mut egui::Ui, theme: ThemePalette, add_contents: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
         .fill(theme.card_bg)
         .stroke(Stroke::new(1.0_f32, theme.card_border))
-        .corner_radius(CornerRadius::same(12))
+        .corner_radius(CornerRadius::same(14))
         .inner_margin(Margin::same(16))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add_contents(ui);
+        });
+}
+
+fn fluent_card_compact(
+    ui: &mut egui::Ui,
+    theme: ThemePalette,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    egui::Frame::new()
+        .fill(theme.card_bg)
+        .stroke(Stroke::new(1.0_f32, theme.card_border))
+        .corner_radius(CornerRadius::same(12))
+        .inner_margin(Margin::symmetric(14, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             add_contents(ui);
@@ -1752,10 +2140,12 @@ fn danger_button(ui: &mut egui::Ui, label: &str, theme: ThemePalette) -> egui::R
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_sidebar_nav_item(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     tab: DesktopTab,
+    icon_kind: NavIconKind,
     selected: bool,
     title: &str,
     subtitle: &str,
@@ -1763,7 +2153,7 @@ fn draw_sidebar_nav_item(
 ) -> bool {
     let desired = Vec2::new(ui.available_width(), 52.0);
     let (rect, response) = ui.allocate_exact_size(desired, Sense::click());
-    let id = egui::Id::new(("sidebar_nav", tab as u8));
+    let id = Id::new(("sidebar_nav", tab as u8));
     let sel_t = ctx.animate_bool_with_time(id.with("sel"), selected, ANIM_DURATION);
     let hov_t = ctx.animate_bool_with_time(id.with("hov"), response.hovered(), 0.12);
 
@@ -1786,20 +2176,54 @@ fn draw_sidebar_nav_item(
         painter.rect_filled(bar_rect, CornerRadius::same(2), theme.accent);
     }
 
+    let icon_color = if selected {
+        theme.accent
+    } else {
+        theme.text_secondary
+    };
+    let ic_center = Pos2::new(rect.left() + 20.0, rect.center().y);
+    let stroke = Stroke::new(1.7_f32, icon_color);
+    match icon_kind {
+        NavIconKind::Grid => {
+            for dx in [-4.0_f32, 3.0] {
+                for dy in [-4.0_f32, 3.0] {
+                    painter.rect_stroke(
+                        Rect::from_center_size(ic_center + Vec2::new(dx, dy), Vec2::splat(5.0)),
+                        CornerRadius::same(1),
+                        stroke,
+                        StrokeKind::Inside,
+                    );
+                }
+            }
+        }
+        NavIconKind::Phone => {
+            painter.rect_stroke(
+                Rect::from_center_size(ic_center, Vec2::new(9.0, 14.0)),
+                CornerRadius::same(2),
+                stroke,
+                StrokeKind::Inside,
+            );
+        }
+        NavIconKind::Shield => {
+            painter.circle_stroke(ic_center, 6.5, stroke);
+            painter.circle_filled(ic_center, 2.2, icon_color);
+        }
+    }
+
     let title_color = if selected {
         theme.accent
     } else {
         theme.text_primary
     };
     painter.text(
-        rect.left_top() + Vec2::new(14.0, 9.0),
+        rect.left_top() + Vec2::new(36.0, 9.0),
         Align2::LEFT_TOP,
         title,
-        FontId::proportional(14.0),
+        FontId::proportional(13.8),
         title_color,
     );
     painter.text(
-        rect.left_bottom() + Vec2::new(14.0, -8.0),
+        rect.left_bottom() + Vec2::new(36.0, -8.0),
         Align2::LEFT_BOTTOM,
         subtitle,
         FontId::proportional(11.0),
@@ -1822,9 +2246,8 @@ fn draw_color_row(ui: &mut egui::Ui, label: &str, hex_value: &mut String) {
 }
 
 fn configure_fonts(ctx: &egui::Context) {
-    let windows_font = fs::read(r"C:\Windows\Fonts\segoeui.ttf");
-    if let Ok(bytes) = windows_font {
-        let mut fonts = FontDefinitions::default();
+    let mut fonts = FontDefinitions::default();
+    if let Ok(bytes) = fs::read(r"C:\Windows\Fonts\segoeui.ttf") {
         fonts
             .font_data
             .insert("segoeui".to_owned(), Arc::new(FontData::from_owned(bytes)));
@@ -1833,8 +2256,19 @@ fn configure_fonts(ctx: &egui::Context) {
             .entry(FontFamily::Proportional)
             .or_default()
             .insert(0, "segoeui".to_owned());
-        ctx.set_fonts(fonts);
     }
+    if let Ok(sym_bytes) = fs::read(r"C:\Windows\Fonts\seguisym.ttf") {
+        fonts.font_data.insert(
+            "seguisym".to_owned(),
+            Arc::new(FontData::from_owned(sym_bytes)),
+        );
+        fonts
+            .families
+            .entry(FontFamily::Proportional)
+            .or_default()
+            .push("seguisym".to_owned());
+    }
+    ctx.set_fonts(fonts);
 }
 
 fn apply_clean_modern_theme(ctx: &egui::Context, theme: ThemePalette) {
@@ -1908,7 +2342,7 @@ pub fn parse_hex_rgba(raw: &str) -> Option<[u8; 4]> {
     }
 }
 
-/// Parses `#RRGGBB` or `#AARRGGBB` hex colors used by [`WidgetStyle`] into [`Color32`].
+/// Parses `#RRGGBB` or `#AARRGGBB` hex colors used by [`nexdeck_api::panels::WidgetStyle`] into [`Color32`].
 #[must_use]
 pub fn parse_hex_color(raw: &str) -> Option<Color32> {
     let [r, g, b, a] = parse_hex_rgba(raw)?;

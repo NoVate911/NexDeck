@@ -1,6 +1,7 @@
 //! Pure-Rust Desktop Manager GUI entrypoint for NexDeck.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod qr;
 mod state;
 mod ui;
 

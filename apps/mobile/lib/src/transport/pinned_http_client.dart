@@ -114,10 +114,23 @@ class PinnedHttpPairingClient implements PairingClient {
     final normalizedExpected = normalizeFingerprintSha256(
       expectedFingerprintSha256,
     );
-    final client = createPinnedHttpClient(
-      expectedFingerprintSha256: normalizedExpected,
-      connectionTimeout: requestTimeout,
-    );
+    String? observedCertSha256;
+    final HttpClient client;
+    if (normalizedExpected.isEmpty) {
+      final context = SecurityContext(withTrustedRoots: false);
+      client = HttpClient(context: context)
+        ..connectionTimeout = requestTimeout
+        ..badCertificateCallback =
+            (X509Certificate cert, String host, int port) {
+              observedCertSha256 = computeCertificateSha256(cert.der);
+              return true;
+            };
+    } else {
+      client = createPinnedHttpClient(
+        expectedFingerprintSha256: normalizedExpected,
+        connectionTimeout: requestTimeout,
+      );
+    }
     try {
       final uri = baseUri.replace(path: '/health');
       final req = await client.getUrl(uri).timeout(requestTimeout);
@@ -146,12 +159,12 @@ class PinnedHttpPairingClient implements PairingClient {
           'Несовместимая версия протокола агента: ${health.protocolVersion}',
         );
       }
-      if (!constantTimeHexEquals(
-        health.fingerprintSha256,
-        normalizedExpected,
-      )) {
+      final checkTarget = normalizedExpected.isNotEmpty
+          ? normalizedExpected
+          : (observedCertSha256 ?? '');
+      if (!constantTimeHexEquals(health.fingerprintSha256, checkTarget)) {
         throw const PairingClientException(
-          'Отпечаток сертификата в ответе /health не совпадает с ожидаемым.',
+          'Отпечаток сертификата в ответе /health не совпадает с TLS-соединением.',
         );
       }
       return health;

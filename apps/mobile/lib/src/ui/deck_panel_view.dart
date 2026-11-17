@@ -361,14 +361,34 @@ class _DeckGridCanvas extends StatelessWidget {
                       top: r * (cellHeight + _gridGap),
                       width: cellWidth,
                       height: cellHeight,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: Theme.of(context).colorScheme.outlineVariant
-                                .withValues(alpha: 0.4),
-                          ),
-                        ),
+                      child: DragTarget<String>(
+                        onWillAcceptWithDetails: (details) =>
+                            details.data.isNotEmpty,
+                        onAcceptWithDetails: (details) {
+                          deckController.moveWidgetToCell(details.data, c, r);
+                        },
+                        builder: (context, candidateData, rejectedData) {
+                          final hovering = candidateData.isNotEmpty;
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 140),
+                            decoration: BoxDecoration(
+                              color: hovering
+                                  ? Theme.of(context).colorScheme.primary
+                                        .withValues(alpha: 0.22)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                width: hovering ? 2.0 : 1.0,
+                                color: hovering
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Theme.of(context)
+                                          .colorScheme
+                                          .outlineVariant
+                                          .withValues(alpha: 0.4),
+                              ),
+                            ),
+                          );
+                        },
                       ),
                     ),
               for (final widgetSpec in panel.widgets)
@@ -381,29 +401,87 @@ class _DeckGridCanvas extends StatelessWidget {
                   height:
                       widgetSpec.rowSpan * cellHeight +
                       (widgetSpec.rowSpan - 1) * _gridGap,
-                  child: DeckWidgetCard(
-                    spec: widgetSpec,
-                    snapshot: snapshot,
-                    history: _chartHistoryFor(widgetSpec.telemetry),
-                    isConnected: isConnected,
-                    isEditMode: isEditMode,
-                    isSelected:
-                        isEditMode &&
-                        deckController.selectedWidgetId == widgetSpec.id,
-                    isToggleActive: deckController.isToggleActive(
-                      widgetSpec.id,
-                    ),
-                    onTap: () {
-                      if (isEditMode) {
-                        deckController.selectWidget(widgetSpec.id);
-                      } else {
-                        deckController.activateWidgetAction(
-                          widgetSpec,
-                          agentController,
-                        );
-                      }
-                    },
-                  ),
+                  child: isEditMode
+                      ? LongPressDraggable<String>(
+                          data: widgetSpec.id,
+                          delay: const Duration(milliseconds: 220),
+                          feedback: Material(
+                            color: Colors.transparent,
+                            child: SizedBox(
+                              width:
+                                  widgetSpec.colSpan * cellWidth +
+                                  (widgetSpec.colSpan - 1) * _gridGap,
+                              height:
+                                  widgetSpec.rowSpan * cellHeight +
+                                  (widgetSpec.rowSpan - 1) * _gridGap,
+                              child: Opacity(
+                                opacity: 0.88,
+                                child: DeckWidgetCard(
+                                  spec: widgetSpec,
+                                  snapshot: snapshot,
+                                  history: _chartHistoryFor(
+                                    widgetSpec.telemetry,
+                                  ),
+                                  isConnected: isConnected,
+                                  isEditMode: true,
+                                  isSelected: true,
+                                  isToggleActive: deckController.isToggleActive(
+                                    widgetSpec.id,
+                                  ),
+                                  onTap: null,
+                                ),
+                              ),
+                            ),
+                          ),
+                          childWhenDragging: Opacity(
+                            opacity: 0.32,
+                            child: DeckWidgetCard(
+                              spec: widgetSpec,
+                              snapshot: snapshot,
+                              history: _chartHistoryFor(widgetSpec.telemetry),
+                              isConnected: isConnected,
+                              isEditMode: isEditMode,
+                              isSelected:
+                                  deckController.selectedWidgetId ==
+                                  widgetSpec.id,
+                              isToggleActive: deckController.isToggleActive(
+                                widgetSpec.id,
+                              ),
+                              onTap: () =>
+                                  deckController.selectWidget(widgetSpec.id),
+                            ),
+                          ),
+                          child: DeckWidgetCard(
+                            spec: widgetSpec,
+                            snapshot: snapshot,
+                            history: _chartHistoryFor(widgetSpec.telemetry),
+                            isConnected: isConnected,
+                            isEditMode: isEditMode,
+                            isSelected:
+                                deckController.selectedWidgetId ==
+                                widgetSpec.id,
+                            isToggleActive: deckController.isToggleActive(
+                              widgetSpec.id,
+                            ),
+                            onTap: () =>
+                                deckController.selectWidget(widgetSpec.id),
+                          ),
+                        )
+                      : DeckWidgetCard(
+                          spec: widgetSpec,
+                          snapshot: snapshot,
+                          history: _chartHistoryFor(widgetSpec.telemetry),
+                          isConnected: isConnected,
+                          isEditMode: isEditMode,
+                          isSelected: false,
+                          isToggleActive: deckController.isToggleActive(
+                            widgetSpec.id,
+                          ),
+                          onTap: () => deckController.activateWidgetAction(
+                            widgetSpec,
+                            agentController,
+                          ),
+                        ),
                 ),
               if (panel.widgets.isEmpty)
                 Center(

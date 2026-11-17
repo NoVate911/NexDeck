@@ -136,9 +136,10 @@ class AgentController extends ChangeNotifier {
       _setError('Порт должен быть в диапазоне 1..65535.');
       return false;
     }
-    if (!isValidFingerprintSha256(normalizedFingerprint)) {
+    if (normalizedFingerprint.isNotEmpty &&
+        !isValidFingerprintSha256(normalizedFingerprint)) {
       _setError(
-        'SHA-256 отпечаток сертификата должен содержать 64 hex-символа.',
+        'SHA-256 отпечаток сертификата должен содержать 64 hex-символа (или оставьте поле пустым для автоопределения по ПИН-коду).',
       );
       return false;
     }
@@ -158,10 +159,13 @@ class AgentController extends ChangeNotifier {
 
     try {
       final baseUri = Uri(scheme: 'https', host: trimmedHost, port: port);
-      await _pairingClient.checkHealth(
+      final health = await _pairingClient.checkHealth(
         baseUri,
         expectedFingerprintSha256: normalizedFingerprint,
       );
+      final resolvedFingerprint = normalizedFingerprint.isNotEmpty
+          ? normalizedFingerprint
+          : normalizeFingerprintSha256(health.fingerprintSha256);
 
       _statusMessage = 'Выполняется сопряжение по PIN...';
       notifyListeners();
@@ -172,7 +176,7 @@ class AgentController extends ChangeNotifier {
 
       final credentials = await _pairingClient.pair(
         baseUri: baseUri,
-        expectedFingerprintSha256: normalizedFingerprint,
+        expectedFingerprintSha256: resolvedFingerprint,
         request: PairRequest(
           pin: trimmedPin,
           deviceId: assignedDeviceId,

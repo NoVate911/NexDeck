@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../models/protocol_models.dart';
@@ -21,7 +22,7 @@ class _PairingScreenState extends State<PairingScreen> {
     text: '127.0.0.1',
   );
   final TextEditingController _portController = TextEditingController(
-    text: '9443',
+    text: '8765',
   );
   final TextEditingController _fingerprintController = TextEditingController();
   final TextEditingController _pinController = TextEditingController();
@@ -40,6 +41,19 @@ class _PairingScreenState extends State<PairingScreen> {
     _pinController.dispose();
     _deviceNameController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pasteAndApplyFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim() ?? '';
+    if (text.isEmpty) {
+      setState(() {
+        _localValidationError = 'Буфер обмена пуст.';
+      });
+      return;
+    }
+    _qrController.text = text;
+    _applyQrJson();
   }
 
   void _applyQrJson() {
@@ -122,16 +136,28 @@ class _PairingScreenState extends State<PairingScreen> {
                             ),
                           ),
                           const SizedBox(height: 12),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: OutlinedButton.icon(
-                              key: const Key('apply_qr_button'),
-                              onPressed: controller.isBusy
-                                  ? null
-                                  : _applyQrJson,
-                              icon: const Icon(Icons.qr_code_2),
-                              label: const Text('Заполнить поля из QR JSON'),
-                            ),
+                          Wrap(
+                            alignment: WrapAlignment.end,
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              FilledButton.tonalIcon(
+                                key: const Key('paste_qr_clipboard_button'),
+                                onPressed: controller.isBusy
+                                    ? null
+                                    : _pasteAndApplyFromClipboard,
+                                icon: const Icon(Icons.content_paste_rounded),
+                                label: const Text('Вставить из буфера'),
+                              ),
+                              OutlinedButton.icon(
+                                key: const Key('apply_qr_button'),
+                                onPressed: controller.isBusy
+                                    ? null
+                                    : _applyQrJson,
+                                icon: const Icon(Icons.qr_code_2),
+                                label: const Text('Заполнить поля из QR JSON'),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -184,8 +210,7 @@ class _PairingScreenState extends State<PairingScreen> {
                             key: const Key('fingerprint_field'),
                             controller: _fingerprintController,
                             decoration: const InputDecoration(
-                              labelText:
-                                  'SHA-256 отпечаток сертификата (64 hex)',
+                              labelText: 'Отпечаток сертификата (необязательно — определяется автоматически)',
                               border: OutlineInputBorder(),
                             ),
                           ),
