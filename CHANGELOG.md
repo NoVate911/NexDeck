@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### Добавлено
+- TLS/WSS-сервер (`tokio` + `axum` + `axum-server` + `rustls` + `rcgen`) и подсистема сопряжения (`DeviceRegistry`, PIN/QR, SHA-256 хэши `device_token`, эндпоинты `/health`, `/pair`, `/ws`) в `crates/transport`.
 - Нативный сборщик системной телеметрии Windows 11 `WindowsCollector` в `crates/monitoring` поверх `windows-sys` (Win32/PDH: CPU, по-ядерная нагрузка, частота, RAM, диски, сеть `tx/rx`, батарея, uptime) и `StaticCollector` для тестов.
 - Согласованы и зафиксированы архитектурные решения Этапа 1: `egui / eframe` ([ADR-0002](docs/architecture/adr/0002-desktop-ui-pure-rust.md)), `tokio + axum + rustls` WSS + PIN/QR pairing ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)), нативный Win32/PDH сборщик `windows-sys` ([ADR-0006](docs/architecture/adr/0006-monitoring-win32-pdh.md)).
 - Локализация документации, `README.md`, шаблонов Issue/PR и описания репозитория на русский язык (с англоязычным зеркалом `docs/README.en.md`).

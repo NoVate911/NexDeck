@@ -1,16 +1,22 @@
-//! Transport-agnostic contracts and state transitions for NexDeck.
+//! Transport-agnostic contracts, TLS/WSS server, and pairing for NexDeck.
 //!
-//! Application logic interacts exclusively with the [`Transport`] trait and
-//! [`Envelope`] framing without coupling to Wi-Fi WebSocket, USB, or Bluetooth
-//! specifics.
+//! Application logic interacts with [`Transport`] and [`Envelope`] framing,
+//! while Stage 1 Wi-Fi transport provides self-signed WSS ([`tls`]), one-time
+//! PIN/QR pairing ([`pairing`]), and an Axum WebSocket server ([`server`]).
 
 use std::fmt;
 
-/// Protocol version supported by the Stage 0 transport contract.
+use serde::{Deserialize, Serialize};
+
+pub mod pairing;
+pub mod server;
+pub mod tls;
+
+/// Protocol version supported by the transport contract.
 pub const PROTOCOL_VERSION: u16 = 1;
 
 /// Physical or logical channel used to exchange messages with a mobile client.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TransportKind {
     /// Local network WebSocket transport (MVP primary transport).
     WifiWebSocket,
@@ -34,7 +40,7 @@ pub enum TransportState {
 }
 
 /// Logical channel topic carried inside a transport [`Envelope`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MessageKind {
     /// System telemetry frame.
     Telemetry,
@@ -49,7 +55,7 @@ pub enum MessageKind {
 }
 
 /// Framed message transferred across any [`Transport`] implementation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Envelope {
     /// Wire protocol version.
     pub protocol_version: u16,

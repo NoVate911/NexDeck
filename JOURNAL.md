@@ -6,9 +6,9 @@
 
 ## Текущее состояние
 
-- **Актуальный этап:** Этап 1 (Core Agent) — **реализован модуль мониторинга `crates/monitoring` (PR 1.1)**.
+- **Актуальный этап:** Этап 1 (Core Agent) — **реализован WSS-сервер, TLS и pairing в `crates/transport` (PR 1.2)**.
 - **Версия workspace:** `0.1.0` (Rust Edition 2024, `rust-version = 1.85`).
-- **Последний выполненный шаг:** [PR #11](https://github.com/NoVate911/NexDeck/pull/11) (ADR Этапа 1); реализован `WindowsCollector` (`windows-sys`: CPU, по-ядерная нагрузка PDH, частота, RAM, диски, сеть `tx/rx`, батарея, uptime) с RAII-обёртками и тестами.
+- **Последний выполненный шаг:** [PR #13](https://github.com/NoVate911/NexDeck/pull/13) (`WindowsCollector` в `crates/monitoring`); в `crates/transport` добавлены `HostTlsIdentity` (`rcgen`/`rustls`), `DeviceRegistry` (PIN/QR + SHA-256 хэши `device_token` с constant-time проверкой) и `axum` WSS-сервер (`/health`, `/pair`, `/ws`).
 - **Согласованные решения Этапа 1:**
   - Сеть и сервер: `tokio` (`current_thread`) + `axum` (HTTP + WebSocket) + `rustls` WSS с пиннингом отпечатка самоподписанного сертификата и pairing по PIN/QR с хранением SHA-256 хэша `device_token` ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)).
   - Мониторинг Windows 11: нативные Win32/PDH API через `windows-sys` (изолированный FFI в `crates/monitoring`) + портативный mock/адаптер для тестов и Linux CI ([ADR-0006](docs/architecture/adr/0006-monitoring-win32-pdh.md)).
@@ -18,8 +18,7 @@
 
 ## Что делать следующим (Шаги Этапа 1)
 
-1. **PR 1.2 (`crates/transport`):** реализовать PIN/QR pairing, хранилище хэшей `device_token`, генерацию TLS-сертификата + `axum` WSS-сервер и протокол сообщений.
-2. **PR 1.3 (`crates/core`):** собрать асинхронный цикл `nexdeck-agent` (`tokio` `current_thread`), сохранение конфига, автозапуск в реестре Windows и измерение потребления RAM (цель 2–5 МБ в простое).
+1. **PR 1.3 (`crates/core`):** собрать асинхронный цикл `nexdeck-agent` (`tokio` `current_thread`), сохранение конфига/устройств, автозапуск в реестре Windows, трансляцию телеметрии по WSS и профилирование RAM (цель 2–5 МБ в простое).
 
 ---
 
