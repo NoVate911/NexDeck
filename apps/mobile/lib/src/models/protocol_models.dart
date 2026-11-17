@@ -146,6 +146,16 @@ class Envelope {
     return SystemSnapshot.fromJson(decodePayloadJson());
   }
 
+  /// Decodes an execution acknowledgment from a `ControlCommand` envelope.
+  ControlCommandResponse decodeControlResponse() {
+    if (kind != MessageKind.controlCommand) {
+      throw FormatException(
+        'Expected ControlCommand envelope, received "${kind.wireName}".',
+      );
+    }
+    return ControlCommandResponse.fromJson(decodePayloadJson());
+  }
+
   /// Serializes this envelope into wire JSON matching `crates/transport`.
   Map<String, Object?> toJson() {
     validate();
@@ -331,4 +341,94 @@ class PairedCredentials {
 
   /// SHA-256 hex fingerprint of the host TLS certificate.
   final String fingerprintSha256;
+}
+
+/// Allowlisted host media & volume control actions matching `ControlAction` in Rust.
+enum ControlAction {
+  /// Step host master audio volume up.
+  volumeUp('VolumeUp', 'Громче'),
+
+  /// Step host master audio volume down.
+  volumeDown('VolumeDown', 'Тише'),
+
+  /// Toggle host master audio mute state.
+  volumeMuteToggle('VolumeMuteToggle', 'Без звука'),
+
+  /// Toggle media playback (play / pause).
+  mediaPlayPause('MediaPlayPause', 'Пауза / Пуск'),
+
+  /// Skip to next media track.
+  mediaNextTrack('MediaNextTrack', 'След. трек'),
+
+  /// Return to previous media track.
+  mediaPreviousTrack('MediaPreviousTrack', 'Пред. трек');
+
+  const ControlAction(this.wireName, this.displayLabel);
+
+  /// Exact enum variant name expected by `nexdeck-transport` serde JSON.
+  final String wireName;
+
+  /// Concise Russian UI label for buttons and notifications.
+  final String displayLabel;
+
+  /// Parses [wireName] into [ControlAction].
+  static ControlAction fromWireName(String wireName) {
+    for (final action in values) {
+      if (action.wireName == wireName) {
+        return action;
+      }
+    }
+    throw FormatException('Unsupported ControlAction "$wireName".');
+  }
+}
+
+/// Outbound command request matching `ControlCommandRequest` in `crates/transport`.
+class ControlCommandRequest {
+  /// Creates a [ControlCommandRequest].
+  const ControlCommandRequest({required this.commandId, required this.action});
+
+  /// Printable ASCII correlation ID (`1..=64` chars without spaces).
+  final String commandId;
+
+  /// Allowlisted action to trigger on the host.
+  final ControlAction action;
+
+  /// Encodes request matching Rust `serde` layout.
+  Map<String, Object?> toJson() => {
+    'command_id': commandId,
+    'action': action.wireName,
+  };
+}
+
+/// Host response matching `ControlCommandResponse` in `crates/transport`.
+class ControlCommandResponse {
+  /// Creates a [ControlCommandResponse].
+  const ControlCommandResponse({
+    required this.commandId,
+    required this.action,
+    required this.ok,
+    required this.message,
+  });
+
+  /// Decodes JSON response returned over WSS.
+  factory ControlCommandResponse.fromJson(Map<String, Object?> json) {
+    return ControlCommandResponse(
+      commandId: readRequired<String>(json, 'command_id'),
+      action: ControlAction.fromWireName(readRequired<String>(json, 'action')),
+      ok: readRequired<bool>(json, 'ok'),
+      message: readRequired<String>(json, 'message'),
+    );
+  }
+
+  /// Echoed request correlation identifier.
+  final String commandId;
+
+  /// Executed or rejected action.
+  final ControlAction action;
+
+  /// Whether the host executed the action cleanly.
+  final bool ok;
+
+  /// Diagnostic status message from the host agent.
+  final String message;
 }

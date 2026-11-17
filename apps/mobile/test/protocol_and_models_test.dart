@@ -148,6 +148,36 @@ void main() {
         throwsFormatException,
       );
     });
+
+    test(
+      'round-trips ControlAction requests and decodes ControlCommandResponse',
+      () {
+        for (final action in ControlAction.values) {
+          final req = ControlCommandRequest(commandId: 'cmd-1', action: action);
+          expect(req.toJson(), {
+            'command_id': 'cmd-1',
+            'action': action.wireName,
+          });
+          expect(ControlAction.fromWireName(action.wireName), action);
+        }
+
+        final responseEnvelope = Envelope.json(
+          messageId: 15,
+          kind: MessageKind.controlCommand,
+          body: {
+            'command_id': 'cmd-15',
+            'action': 'VolumeUp',
+            'ok': true,
+            'message': 'Executed VolumeUp',
+          },
+        );
+        final response = responseEnvelope.decodeControlResponse();
+        expect(response.commandId, 'cmd-15');
+        expect(response.action, ControlAction.volumeUp);
+        expect(response.ok, isTrue);
+        expect(response.message, 'Executed VolumeUp');
+      },
+    );
   });
 
   group('FileSessionStore', () {

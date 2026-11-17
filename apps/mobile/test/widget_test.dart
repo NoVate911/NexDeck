@@ -85,7 +85,16 @@ class _FakeTransport implements NexDeckTransport {
             'total_bytes': 16 * 1024 * 1024 * 1024,
             'used_bytes': 4 * 1024 * 1024 * 1024,
           },
-          'gpus': const <Object?>[],
+          'gpus': [
+            {
+              'name': 'ExampleGPU',
+              'usage_pct': 18.0,
+              'temperature_celsius': 52.0,
+              'clock_mhz': 1650,
+              'vram_used_bytes': 2 * 1024 * 1024 * 1024,
+              'vram_total_bytes': 8 * 1024 * 1024 * 1024,
+            },
+          ],
           'disks': [
             {
               'mount_point': r'C:\',
@@ -95,8 +104,31 @@ class _FakeTransport implements NexDeckTransport {
               'write_bytes_per_sec': 0,
             },
           ],
-          'networks': const <Object?>[],
+          'networks': [
+            {
+              'interface_name': 'ExampleWiFi',
+              'tx_bytes_per_sec': 2048,
+              'rx_bytes_per_sec': 8192,
+              'total_tx_bytes': 1024 * 1024,
+              'total_rx_bytes': 4 * 1024 * 1024,
+            },
+          ],
           'battery': null,
+        },
+      ),
+    );
+  }
+
+  void pushControlAck(String commandId, ControlAction action) {
+    _envelopes.add(
+      Envelope.json(
+        messageId: 20,
+        kind: MessageKind.controlCommand,
+        body: {
+          'command_id': commandId,
+          'action': action.wireName,
+          'ok': true,
+          'message': 'Executed ${action.wireName}',
         },
       ),
     );
@@ -167,13 +199,52 @@ void main() {
       transport.pushTelemetry(cpuPct: 44.5, uptimeSecs: 125);
       await tester.pumpAndSettle();
 
+      await tester.ensureVisible(find.byKey(const Key('control_play_pause')));
+      await tester.tap(find.byKey(const Key('control_play_pause')));
+      await tester.pump();
+      expect(transport.sentEnvelopes.last.kind, MessageKind.controlCommand);
+      final reqPayload = transport.sentEnvelopes.last.decodePayloadJson();
+      expect(reqPayload['action'], 'MediaPlayPause');
+
+      transport.pushControlAck(
+        reqPayload['command_id']! as String,
+        ControlAction.mediaPlayPause,
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Последняя команда:'), findsOneWidget);
+
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('toggle_cpu_cores_button')),
+        200,
+        scrollable: find.byType(Scrollable),
+      );
       expect(find.text('CPU: 44.5%'), findsOneWidget);
+      expect(find.byKey(const Key('cpu_history_chart')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('toggle_cpu_cores_button')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('CPU 0:'), findsOneWidget);
+      expect(find.textContaining('CPU 1:'), findsOneWidget);
+
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('ram_history_chart')),
+        200,
+        scrollable: find.byType(Scrollable),
+      );
       expect(find.text('RAM: 25.0%'), findsOneWidget);
+      expect(find.byKey(const Key('ram_history_chart')), findsOneWidget);
+
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('network_history_chart')),
+        250,
+        scrollable: find.byType(Scrollable),
+      );
+      expect(find.textContaining('VRAM:'), findsOneWidget);
       expect(find.textContaining(r'C:\'), findsOneWidget);
+      expect(find.byKey(const Key('network_history_chart')), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('heartbeat_button')));
       await tester.pump();
-      expect(transport.sentEnvelopes.single.kind, MessageKind.heartbeat);
+      expect(transport.sentEnvelopes.last.kind, MessageKind.heartbeat);
     },
   );
 }
