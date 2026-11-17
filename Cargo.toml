@@ -22,6 +22,7 @@ repository = "https://github.com/NoVate911/NexDeck"
 [workspace.dependencies]
 axum = { version = "0.8", default-features = false, features = ["ws", "json", "tokio", "http1"] }
 axum-server = { version = "0.8", default-features = false, features = ["tls-rustls-no-provider"] }
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "x11"] }
 nexdeck-api = { version = "0.1.0", path = "crates/api" }
 nexdeck-approval = { version = "0.1.0", path = "crates/approval" }
 nexdeck-core = { version = "0.1.0", path = "crates/core" }

@@ -20,7 +20,14 @@ deny = [
 ]
 skip = [
     { crate = "base64@0.22.1", reason = "tungstenite/axum use base64 0.22 while rcgen 0.14.10 uses 0.23" },
+    { crate = "calloop@0.13.0", reason = "winit 0.30 depends on calloop 0.13 while smithay-client-toolkit 0.20 uses 0.14" },
     { crate = "getrandom@0.2.17", reason = "ring 0.17 depends on getrandom 0.2" },
+    { crate = "linux-raw-sys@0.4.15", reason = "rustix 0.38 depends on linux-raw-sys 0.4 while rustix 1.1 uses 0.12" },
+    { crate = "miniz_oxide@0.8.9", reason = "png 0.18 depends on miniz_oxide 0.8 while flate2 1.1 uses 0.9" },
+    { crate = "rustix@0.38.44", reason = "winit 0.30 and calloop 0.13 use rustix 0.38 while smithay/x11rb use 1.1" },
+    { crate = "syn@2.0.119", reason = "thiserror-impl 1.0 depends on syn 2.0 while the rest of the workspace uses syn 3.0" },
+    { crate = "thiserror@1.0.69", reason = "calloop 0.13 depends on thiserror 1.0 while smithay/tungstenite use 2.0" },
+    { crate = "thiserror-impl@1.0.69", reason = "transitive proc-macro of thiserror 1.0.69 pulled by calloop 0.13" },
 ]
 skip-tree = [
     { crate = "windows-sys", reason = "tokio/socket2/ring use 0.52 while monitoring uses 0.61" },
@@ -36,8 +43,11 @@ allow = [
     "Apache-2.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "BSL-1.0",
     "ISC",
     "MIT",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
     "Unicode-3.0",
 ]
 exceptions = []
