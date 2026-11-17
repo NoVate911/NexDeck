@@ -136,6 +136,12 @@ impl WssServerHandle {
         Ok(self.broadcast_tx.send(json).unwrap_or(0))
     }
 
+    /// Subscribes to serialized outbound envelope JSON frames.
+    #[must_use]
+    pub fn subscribe_broadcast(&self) -> broadcast::Receiver<String> {
+        self.broadcast_tx.subscribe()
+    }
+
     /// Initiates graceful shutdown of the WSS server.
     pub fn shutdown(&self) {
         self.handle.graceful_shutdown(Some(Duration::from_secs(2)));
