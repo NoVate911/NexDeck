@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "active_panel_id": "system-overview",
+  "panels": [
+    {
+      "id": "system-overview",
+      "name": "Системный обзор",
+      "columns": 4,
+      "refresh_interval_ms": 1000,
+      "widgets": [
+        {
+          "id": "cpu-chart",
+          "title": "CPU Нагрузка",
+          "kind": "Chart",
+          "col": 0,
+          "row": 0,
+          "col_span": 2,
+          "row_span": 2,
+          "telemetry": "CpuUsagePct",
+          "action": {
+            "type": "None"
+          },
+          "icon": "Cpu",
+          "style": {
+            "background_hex": "#1E293B",
+            "foreground_hex": "#F8FAFC",
+            "accent_hex": "#38BDF8",
+            "font_size_sp": 14,
+            "corner_radius": 12
+          }
+        },
+        {
+          "id": "ram-gauge",
+          "title": "RAM %",
+          "kind": "Gauge",
+          "col": 2,
+          "row": 0,
+          "col_span": 2,
+          "row_span": 1,
+          "telemetry": "RamUsagePct",
+          "action": {
+            "type": "None"
+          },
+          "icon": "Memory",
+          "style": {
+            "background_hex": "#1E293B",
+            "foreground_hex": "#F8FAFC",
+            "accent_hex": "#38BDF8",
+            "font_size_sp": 14,
+            "corner_radius": 12
+          }
+        },
+        {
+          "id": "gpu-usage",
+          "title": "GPU %",
+          "kind": "MetricNumber",
+          "col": 2,
+          "row": 1,
+          "col_span": 2,
+          "row_span": 1,
+          "telemetry": "GpuUsagePct",
+          "action": {
+            "type": "None"
+          },
+          "icon": "Gpu",
+          "style": {
+            "background_hex": "#1E293B",
+            "foreground_hex": "#F8FAFC",
+            "accent_hex": "#38BDF8",
+            "font_size_sp": 14,
+            "corner_radius": 12
+          }
+        },
+        {
+          "id": "media-play",
+          "title": "Пауза / Пуск",
+          "kind": "Button",
+          "col": 0,
+          "row": 2,
+          "col_span": 2,
+          "row_span": 1,
+          "action": {
+            "type": "Control",
+            "action": "MediaPlayPause"
+          },
+          "icon": "PlayPause",
+          "style": {
+            "background_hex": "#1E293B",
+            "foreground_hex": "#F8FAFC",
+            "accent_hex": "#22D3EE",
+            "font_size_sp": 14,
+            "corner_radius": 12
+          }
+        },
+        {
+          "id": "volume-mute",
+          "title": "Без звука",
+          "kind": "Toggle",
+          "col": 2,
+          "row": 2,
+          "col_span": 2,
+          "row_span": 1,
+          "action": {
+            "type": "Control",
+            "action": "VolumeMuteToggle"
+          },
+          "icon": "VolumeMute",
+          "style": {
+            "background_hex": "#1E293B",
+            "foreground_hex": "#F8FAFC",
+            "accent_hex": "#F59E0B",
+            "font_size_sp": 14,
+            "corner_radius": 12
+          }
+        }
+      ]
+    }
+  ]
+}

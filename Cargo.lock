@@ -551,6 +551,9 @@ version = "0.1.0"
 dependencies = [
  "nexdeck-approval",
  "nexdeck-notifications",
+ "nexdeck-transport",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

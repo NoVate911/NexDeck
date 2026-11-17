@@ -4,6 +4,8 @@
 //! [`ApiPermission`] grants, and submit validated requests (`SendNotification`,
 //! `RequestApproval`, `ReadAllowedMetrics`) without unrestricted OS access.
 
+pub mod panels;
+
 use std::collections::HashSet;
 use std::fmt;
 
