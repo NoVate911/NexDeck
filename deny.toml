@@ -8,7 +8,9 @@ all-features = true
 [advisories]
 unmaintained = "all"
 unsound = "all"
-ignore = []
+ignore = [
+    { id = "RUSTSEC-2026-0192", reason = "transitive ttf-parser 0.25.1 via epaint 0.33 -> ab_glyph 0.2.32 has no upstream replacement yet" },
+]
 
 [bans]
 multiple-versions = "deny"
