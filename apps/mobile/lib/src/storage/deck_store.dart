@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../models/panel_models.dart';
+import 'app_data_dir.dart';
 
 /// Persistence contract for storing and loading customizable [DeckConfig] layouts.
 abstract interface class DeckStore {
@@ -39,30 +40,21 @@ class InMemoryDeckStore implements DeckStore {
 /// JSON file-backed [DeckStore] storing `panels.json` alongside `session.json`.
 class FileDeckStore implements DeckStore {
   /// Creates a [FileDeckStore] targeting [file].
-  FileDeckStore(this.file);
+  FileDeckStore(File file) : _storage = AppJsonFile.fixed(file);
 
-  /// Creates a [FileDeckStore] in the standard per-user NexDeckMobile directory.
-  factory FileDeckStore.defaultLocation() {
-    final separator = Platform.pathSeparator;
-    final home =
-        Platform.environment['LOCALAPPDATA'] ??
-        Platform.environment['XDG_DATA_HOME'] ??
-        Platform.environment['HOME'] ??
-        Directory.systemTemp.path;
-    final dir = '$home${separator}NexDeckMobile';
-    return FileDeckStore(File('$dir${separator}panels.json'));
-  }
+  /// Creates a [FileDeckStore] resolved via [resolveMobileDataDir].
+  FileDeckStore.defaultLocation({Future<Directory> Function()? dirResolver})
+    : _storage = AppJsonFile.inAppDataDir(
+        'panels.json',
+        dirResolver: dirResolver,
+      );
 
-  /// Target `panels.json` file.
-  final File file;
+  final AppJsonFile _storage;
 
   @override
   Future<DeckConfig?> loadDeck() async {
-    if (!await file.exists()) {
-      return null;
-    }
-    final content = await file.readAsString();
-    if (content.trim().isEmpty) {
+    final content = await _storage.readNonEmptyString();
+    if (content == null) {
       return null;
     }
     return DeckConfig.importJson(content);
@@ -71,20 +63,9 @@ class FileDeckStore implements DeckStore {
   @override
   Future<void> saveDeck(DeckConfig deck) async {
     final encoded = deck.exportJson();
-    final parent = file.parent;
-    if (!await parent.exists()) {
-      await parent.create(recursive: true);
-    }
-    final stamp = DateTime.now().microsecondsSinceEpoch;
-    final tempFile = File('${file.path}.tmp.$pid.$stamp');
-    await tempFile.writeAsString(encoded, flush: true);
-    await tempFile.rename(file.path);
+    await _storage.writeStringAtomic(encoded);
   }
 
   @override
-  Future<void> clearDeck() async {
-    if (await file.exists()) {
-      await file.delete();
-    }
-  }
+  Future<void> clearDeck() => _storage.deleteIfExists();
 }

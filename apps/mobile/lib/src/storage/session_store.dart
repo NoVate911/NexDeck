@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../models/json_helpers.dart';
 import '../models/protocol_models.dart';
+import 'app_data_dir.dart';
 
 /// Persisted connection credentials for an authorized NexDeck host.
 class HostSession {
@@ -105,30 +106,21 @@ class InMemorySessionStore implements SessionStore {
 /// JSON file-backed [SessionStore] using atomic replacement in app data.
 class FileSessionStore implements SessionStore {
   /// Creates a [FileSessionStore] targeting [file].
-  FileSessionStore(this.file);
+  FileSessionStore(File file) : _storage = AppJsonFile.fixed(file);
 
-  /// Creates a [FileSessionStore] inside an OS-appropriate user app data folder.
-  factory FileSessionStore.defaultLocation() {
-    final separator = Platform.pathSeparator;
-    final home =
-        Platform.environment['LOCALAPPDATA'] ??
-        Platform.environment['XDG_DATA_HOME'] ??
-        Platform.environment['HOME'] ??
-        Directory.systemTemp.path;
-    final dir = '$home${separator}NexDeckMobile';
-    return FileSessionStore(File('$dir${separator}session.json'));
-  }
+  /// Creates a [FileSessionStore] resolved via [resolveMobileDataDir].
+  FileSessionStore.defaultLocation({Future<Directory> Function()? dirResolver})
+    : _storage = AppJsonFile.inAppDataDir(
+        'session.json',
+        dirResolver: dirResolver,
+      );
 
-  /// Target session file.
-  final File file;
+  final AppJsonFile _storage;
 
   @override
   Future<HostSession?> loadSession() async {
-    if (!await file.exists()) {
-      return null;
-    }
-    final content = await file.readAsString();
-    if (content.trim().isEmpty) {
+    final content = await _storage.readNonEmptyString();
+    if (content == null) {
       return null;
     }
     final decoded = jsonDecode(content);
@@ -137,22 +129,11 @@ class FileSessionStore implements SessionStore {
 
   @override
   Future<void> saveSession(HostSession session) async {
-    final parent = file.parent;
-    if (!await parent.exists()) {
-      await parent.create(recursive: true);
-    }
-    final nonce = DateTime.now().microsecondsSinceEpoch;
-    final tempFile = File('${file.path}.tmp.$pid.$nonce');
     final encoded = const JsonEncoder.withIndent('  ')
         .convert(session.toJson());
-    await tempFile.writeAsString(encoded, flush: true);
-    await tempFile.rename(file.path);
+    await _storage.writeStringAtomic(encoded);
   }
 
   @override
-  Future<void> clearSession() async {
-    if (await file.exists()) {
-      await file.delete();
-    }
-  }
+  Future<void> clearSession() => _storage.deleteIfExists();
 }

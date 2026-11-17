@@ -1,13 +1,31 @@
+import java.io.File
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val localProps = Properties().apply {
+    val propsFile = rootProject.file("local.properties")
+    if (propsFile.exists()) {
+        propsFile.inputStream().use { stream -> load(stream) }
+    }
+}
+val sdkDirPath: String? = localProps.getProperty("sdk.dir")
+    ?: System.getenv("ANDROID_HOME")
+    ?: System.getenv("ANDROID_SDK_ROOT")
+val installedNdkVersion: String? = sdkDirPath
+    ?.let { path -> File(path, "ndk").listFiles()?.toList() }
+    ?.filter { dir -> dir.isDirectory && File(dir, "source.properties").exists() }
+    ?.maxByOrNull { dir -> dir.name }
+    ?.name
+
 android {
     namespace = "org.example.nexdeck_mobile"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    ndkVersion = installedNdkVersion ?: flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
