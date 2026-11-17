@@ -189,6 +189,12 @@ impl AgentProcessController {
         }
 
         let mut cmd = Command::new(agent_exe);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
         cmd.arg("--daemon")
             .arg("--config-dir")
             .arg(config_dir)

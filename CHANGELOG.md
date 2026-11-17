@@ -5,9 +5,11 @@
 ## [Unreleased]
 
 ### Исправлено
+- Отключено появление окна командной строки при запуске `nexdeck-desktop.exe` (`#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`) и при фоновом запуске дочернего процесса `nexdeck-agent.exe` (`CREATE_NO_WINDOW` в `apps/desktop/src/state.rs`).
 - Надёжное определение каталога данных на Android (`context.filesDir` через `MethodChannel` в `MainActivity.kt` и общий [`app_data_dir.dart`](apps/mobile/lib/src/storage/app_data_dir.dart)) для хранения `session.json` и `panels.json` без добавления сторонних плагинов, а также автовыбор установленной версии NDK в `apps/mobile/android/app/build.gradle.kts`.
 
 ### Добавлено
+- Редизайн десктопного (`apps/desktop`) и мобильного (`apps/mobile`) клиентов в стиле **Clean Modern (Windows 11 Fluent / macOS)**: боковая навигационная панель с микро-анимациями, двухколоночный конструктор деки, переключатель тёмной/светлой темы, плавные кривые Безье с градиентной заливкой в `TelemetryLineChart` и тактильные микро-анимации нажатия плиток (`AnimatedScale` / `AnimatedSwitcher`).
 - Клиентские SDK для Universal API без внешних зависимостей (`sdk/python/nexdeck_sdk.py`, `sdk/js/nexdeck_sdk.mjs` + `nexdeck_sdk.d.ts`), модульные тесты SDK, синтетические примеры интеграции (`examples/api_approval_request.json`, `examples/api_approval_example.py`, `examples/api_notification_example.mjs`) и справочная документация [`docs/api/universal-api.md`](docs/api/universal-api.md).
 - Серверная часть Universal API (`/api/v1/*` и `/api/v1/ws`) в `crates/api` и `crates/core` поверх существующего `axum`-сервера ([ADR-0007](docs/architecture/adr/0007-universal-api-http-ws-axum.md)), реестр сторонних клиентов `ClientRegistry` с SHA-256 хешами токенов в `clients.json`, разграничение прав (`ApiPermission`), CLI-флаги `--register-client` / `--list-clients` / `--revoke-client` в `nexdeck-agent` и управление клиентами в `apps/desktop`.
 - Динамический Widget Engine и редактор панелей в `apps/mobile` (`DeckStore` / `FileDeckStore` для `panels.json`, `DeckController` с троттлингом `refreshIntervalMs`, `DeckPanelView`, `DeckWidgetCard` для 9 типов виджетов и модальные редакторы стилей/привязок/JSON во вкладке «Панели» `DashboardScreen`).

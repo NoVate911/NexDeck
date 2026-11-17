@@ -6,9 +6,9 @@
 
 ## Текущее состояние
 
-- **Актуальный этап:** Этап 4 (Universal API) **завершён** — выполнен **PR 4.2 (клиентские SDK `sdk/python`, `sdk/js`, примеры `examples/` и документация `docs/api/`, Issue #32)**; следующим начинается **Этап 5 (Remote Approval и Центр уведомлений)**.
+- **Актуальный этап:** Этап 4 (Universal API) **завершён**, выполнен редизайн UI/UX в стиле **Clean Modern (Fluent / macOS)** и скрытие консольного окна (`Issue #34`); следующим начинается **Этап 5 (Remote Approval и Центр уведомлений)**.
 - **Версия workspace:** `0.1.0` (Rust Edition 2024, `rust-version = "1.88"`; Flutter `3.50.0` / Dart `3.14.0` в `apps/mobile`).
-- **Последний выполненный шаг:** реализованы легковесные клиентские SDK без внешних зависимостей для Python (`sdk/python/nexdeck_sdk.py`) и JavaScript/TypeScript (`sdk/js/nexdeck_sdk.mjs` + `nexdeck_sdk.d.ts`) с модульными тестами, синтетические примеры (`examples/api_approval_request.json`, `examples/api_approval_example.py`, `examples/api_notification_example.mjs`) и документация [`docs/api/universal-api.md`](docs/api/universal-api.md); итоги Этапа 4 перенесены в [`stage-4.md`](docs/journal/archive/stage-4.md).
+- **Последний выполненный шаг:** выполнен редизайн `apps/desktop` и `apps/mobile` в стиле Clean Modern (боковая навигация с микро-анимациями `ctx.animate_bool_with_time`, матовые карточки `fluent_card`, переключатель тёмной/светлой темы на ПК; сглаженные кривые Безье на графиках `TelemetryLineChart`, `AnimatedSwitcher` переходов и тактильное масштабирование `AnimatedScale` на плитках в `apps/mobile`), а также отключено открытие окна командной строки при запуске `nexdeck-desktop.exe` (`windows_subsystem = "windows"`) и дочернего `nexdeck-agent.exe` (`CREATE_NO_WINDOW`).
 - **Фактические показатели `nexdeck-agent.exe` (release, LTO + strip):** размер `1 743 360` байт (`~1.66 MiB`); `--measure-ram` — `private=1.23 MiB`, `working_set=6.44 MiB`. `nexdeck-desktop.exe` — `3 614 720` байт.
 - **Согласованные решения:**
   - Сеть и сервер: `tokio` (`current_thread`) + `axum` + `rustls` WSS с пиннингом SHA-256 отпечатка и PIN/QR-pairing ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)), Universal API `/api/v1/*` поверх `axum` ([ADR-0007](docs/architecture/adr/0007-universal-api-http-ws-axum.md)).

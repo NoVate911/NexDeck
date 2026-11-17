@@ -1,4 +1,5 @@
 //! Pure-Rust Desktop Manager GUI entrypoint for NexDeck.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod state;
 mod ui;
@@ -82,9 +83,9 @@ fn launch_gui(config_dir: Option<PathBuf>) -> ExitCode {
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title(format!("NexDeck Desktop {DESKTOP_VERSION}"))
-            .with_inner_size([1160.0, 740.0])
-            .with_min_inner_size([880.0, 560.0]),
+            .with_title(format!("NexDeck Studio {DESKTOP_VERSION}"))
+            .with_inner_size([1240.0, 780.0])
+            .with_min_inner_size([940.0, 620.0]),
         ..Default::default()
     };
 
