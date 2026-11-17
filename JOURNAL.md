@@ -41,6 +41,8 @@
    Оборачивать Win32-указатели в `NonNull` + RAII `Drop`; Windows FFI-утилиты, вызываемые в кроссплатформенных тестах, помечать `#[cfg(any(windows, test))]`.
 7. **Данные в коде и документации:**  
    Только синтетические примеры (`ExampleApp`, `org.example.*`, `127.0.0.1`, стандартные порты). Файл `TZ.md` не добавлять в Git.
+8. **`Dependency Review` на GitHub Actions / Pub без SPDX-метаданных:**  
+   `actions/dependency-review-action@v4` падает при `license: null` и отсутствии `source_repository_url` (например, `subosito/flutter-action`, `fake_async`, `matcher`). После ручной проверки совместимости лицензии (`MIT`, `Apache-2.0`, `BSD-3-Clause`) указывать точные `purl` в `allow-dependencies-licenses` внутри `.github/workflows/dependency-review.yml` вместо отключения `deny-licenses`.
 
 ---
 

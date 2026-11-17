@@ -17,3 +17,5 @@ jobs:
         with:
           fail-on-severity: moderate
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          # Проверенные зависимости (MIT / Apache-2.0 / BSD-3-Clause) без SPDX в GitHub Dependency Graph:
+          allow-dependencies-licenses: pkg:githubactions/subosito/flutter-action, pkg:pub/fake_async, pkg:pub/matcher
