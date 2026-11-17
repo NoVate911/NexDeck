@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### Добавлено
+- Инициализирован Flutter-клиент `nexdeck_mobile` (`apps/mobile`): модели протокола и телеметрии (`Envelope`, `PairingQrPayload`, `SystemSnapshot`), HTTP/WSS-транспорт с SHA-256 TLS-пиннингом сертификата (`SecurityContext(withTrustedRoots: false)` + constant-time сравнение), хранилище сессии, контроллер автопереподключения, экраны сопряжения/мониторинга и проверки Flutter (`Mobile Client (Flutter)`) в GitHub Actions CI.
 - Полноценный runtime `Core Agent` (`nexdeck-agent`) в `crates/core`: асинхронный цикл `tokio` (`current_thread`), рассылка телеметрии по WSS, постоянное хранилище конфигурации/устройств/TLS (`StoragePaths`), автозапуск Windows через `HKCU\...\Run`, замер памяти процесса (`process_metrics`) и CLI (`--daemon`, `--pair`, `--install-autostart`, `--uninstall-autostart`, `--autostart-status`, `--measure-ram`, `--check-config`).
 - JSON-сериализация снимков `SystemSnapshot` и метрик (`serde`) в `crates/monitoring`.
 - TLS/WSS-сервер (`tokio` + `axum` + `axum-server` + `rustls` + `rcgen`) и подсистема сопряжения (`DeviceRegistry`, PIN/QR, SHA-256 хэши `device_token`, эндпоинты `/health`, `/pair`, `/ws`) в `crates/transport`.
