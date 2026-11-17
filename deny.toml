@@ -18,6 +18,13 @@ deny = [
     { crate = "openssl", use-instead = "rustls" },
     { crate = "openssl-sys", use-instead = "rustls" },
 ]
+skip = [
+    { crate = "base64@0.22.1", reason = "tungstenite/axum use base64 0.22 while rcgen 0.14.10 uses 0.23" },
+    { crate = "getrandom@0.2.17", reason = "ring 0.17 depends on getrandom 0.2" },
+]
+skip-tree = [
+    { crate = "windows-sys", reason = "tokio/socket2/ring use 0.52 while monitoring uses 0.61" },
+]
 
 [sources]
 unknown-registry = "deny"
@@ -27,13 +34,10 @@ unknown-git = "deny"
 confidence-threshold = 0.93
 allow = [
     "Apache-2.0",
-    "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
     "MIT",
-    "MPL-2.0",
     "Unicode-3.0",
-    "Zlib",
 ]
 exceptions = []

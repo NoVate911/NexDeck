@@ -15,11 +15,13 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "Apache-2.0"
 repository = "https://github.com/NoVate911/NexDeck"
 
 [workspace.dependencies]
+axum = { version = "0.8", default-features = false, features = ["ws", "json", "tokio", "http1"] }
+axum-server = { version = "0.8", default-features = false, features = ["tls-rustls-no-provider"] }
 nexdeck-api = { version = "0.1.0", path = "crates/api" }
 nexdeck-approval = { version = "0.1.0", path = "crates/approval" }
 nexdeck-core = { version = "0.1.0", path = "crates/core" }
@@ -27,6 +29,12 @@ nexdeck-monitoring = { version = "0.1.0", path = "crates/monitoring" }
 nexdeck-notifications = { version = "0.1.0", path = "crates/notifications" }
 nexdeck-plugin-engine = { version = "0.1.0", path = "crates/plugin_engine" }
 nexdeck-transport = { version = "0.1.0", path = "crates/transport" }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem"] }
+ring = "0.17"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.43", default-features = false, features = ["rt", "net", "sync", "time", "macros", "io-util"] }
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",
