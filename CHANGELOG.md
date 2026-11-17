@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### Добавлено
+- Кросс-платформенные модели конструктора панелей и виджетов (`DeckConfig`, `PanelConfig`, `WidgetSpec`, `WidgetKind`, `WidgetStyle`, валидация коллизий сетки, импорт/экспорт JSON) в `crates/api` и `apps/mobile`, сохранение `panels.json` в `crates/core` и пример `examples/panel_default.json`.
 - Визуализация телеметрии в реальном времени (`TelemetryLineChart` на `CustomPainter` для CPU, RAM и сети TX/RX, раскрываемая детализация по ядрам CPU, GPU VRAM и трафик интерфейсов) и панель управления мультимедиа/громкостью в `apps/mobile`.
 - Строгий белый список команд удалённого управления `ControlAction` / `ControlCommandRequest` / `ControlCommandResponse` в `crates/transport`, маршрутизация `MessageKind::ControlCommand` и нативный Windows-исполнитель `WindowsMediaExecutor` (`SendInput`: `VK_VOLUME_*`, `VK_MEDIA_*`) в `crates/core`.
 - Инициализирован Flutter-клиент `nexdeck_mobile` (`apps/mobile`): модели протокола и телеметрии (`Envelope`, `PairingQrPayload`, `SystemSnapshot`), HTTP/WSS-транспорт с SHA-256 TLS-пиннингом сертификата (`SecurityContext(withTrustedRoots: false)` + constant-time сравнение), хранилище сессии, контроллер автопереподключения, экраны сопряжения/мониторинга и проверки Flutter (`Mobile Client (Flutter)`) в GitHub Actions CI.

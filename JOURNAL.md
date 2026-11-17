@@ -6,9 +6,9 @@
 
 ## Текущее состояние
 
-- **Актуальный этап:** Этап 2 (Mobile Client, `apps/mobile`) **завершён** — следующий шаг **Этап 3 (Widget Engine и Desktop Manager в `apps/desktop` и `apps/mobile`)**.
+- **Актуальный этап:** Этап 3 (Widget Engine и Desktop Manager) — **выполнен PR 3.1 (кросс-платформенные модели конструктора панелей и хранилище `panels.json`)**.
 - **Версия workspace:** `0.1.0` (Rust Edition 2024, `rust-version = "1.88"`; Flutter `3.50.0` / Dart `3.14.0` в `apps/mobile`).
-- **Последний выполненный шаг:** завершена реализация Stage 2.2 — в `crates/transport` и `crates/core` добавлены белый список `ControlAction` и Win32 `SendInput` исполнитель мультимедиа/громкости с подтверждением по WSS; в `apps/mobile` добавлены живые графики `TelemetryLineChart` (`CustomPainter`), детализация по ядрам CPU/GPU VRAM/сети и панель управления мультимедиа.
+- **Последний выполненный шаг:** реализованы синхронные модели панелей и виджетов (`DeckConfig`, `PanelConfig`, `WidgetSpec`, `WidgetKind`, `WidgetStyle`, `TelemetryBinding`, `WidgetAction`) в `crates/api/src/panels.rs` и `apps/mobile/lib/src/models/panel_models.dart`, сохранение `panels.json` в `crates/core/src/storage.rs` и пример `examples/panel_default.json` с перекрёстной проверкой идентичности JSON.
 - **Фактические показатели `nexdeck-agent.exe` (release, LTO + strip):** размер `1 743 872` байт (`~1.66 MiB`); `--measure-ram` — `private=1.23 MiB`, `working_set=6.44 MiB`.
 - **Согласованные решения:**
   - Сеть и сервер: `tokio` (`current_thread`) + `axum` + `rustls` WSS с пиннингом SHA-256 отпечатка и PIN/QR-pairing ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)).
@@ -19,9 +19,8 @@
 
 ## Что делать следующим (Этап 3 — Widget Engine и Desktop Manager)
 
-1. **PR 3.1 (модели конструктора панелей и импорт/экспорт):** согласовать кросс-платформенную JSON-схему панелей и виджетов (`WidgetSpec`, сетка, размеры, цвета/шрифты, частота обновления, `PanelConfig`), общую для `apps/desktop`, `apps/mobile` и `crates/core`.
-2. **PR 3.2 (`apps/desktop` на чистом Rust `egui / eframe`):** реализовать отдельный GUI-конфигуратор для Windows 11 — настройка агента, запуск/остановка, просмотр и отзыв сопряжённых устройств, визуальный редактор панелей и импорт/экспорт конфигураций без утяжеления фонового `nexdeck-agent`.
-3. **PR 3.3 (`apps/mobile` Widget Engine):** динамический рендерер настраиваемых панелей и виджетов (текст, числа, кнопки действий, переключатели, графики, индикаторы, иконки) с локальным сохранением и импортом/экспортом.
+1. **PR 3.2 (`apps/desktop` на чистом Rust `egui / eframe`):** реализовать отдельный GUI-конфигуратор для Windows 11 — настройка `config.json`, автозапуск, управление списком сопряжённых устройств (`devices.json`), визуальный редактор панелей (`panels.json`) и импорт/экспорт конфигураций.
+2. **PR 3.3 (`apps/mobile` Widget Engine):** динамический рендерер настраиваемых панелей и виджетов (текст, числа, кнопки действий, переключатели, графики, индикаторы, иконки) с локальным сохранением и импортом/экспортом.
 
 ---
 
