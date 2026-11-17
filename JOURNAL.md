@@ -6,9 +6,9 @@
 
 ## Текущее состояние
 
-- **Актуальный этап:** Этап 1 (Core Agent) — **согласован стек, старт реализации**.
+- **Актуальный этап:** Этап 1 (Core Agent) — **реализован модуль мониторинга `crates/monitoring` (PR 1.1)**.
 - **Версия workspace:** `0.1.0` (Rust Edition 2024, `rust-version = 1.85`).
-- **Последний выполненный PR:** [PR #9](https://github.com/NoVate911/NexDeck/pull/9) — русская локализация, исключение `TZ.md`, добавление `AGENTS.md`, `JOURNAL.md` с архивом, логотипа `assets/logo.svg` и синтетических примеров.
+- **Последний выполненный шаг:** [PR #11](https://github.com/NoVate911/NexDeck/pull/11) (ADR Этапа 1); реализован `WindowsCollector` (`windows-sys`: CPU, по-ядерная нагрузка PDH, частота, RAM, диски, сеть `tx/rx`, батарея, uptime) с RAII-обёртками и тестами.
 - **Согласованные решения Этапа 1:**
   - Сеть и сервер: `tokio` (`current_thread`) + `axum` (HTTP + WebSocket) + `rustls` WSS с пиннингом отпечатка самоподписанного сертификата и pairing по PIN/QR с хранением SHA-256 хэша `device_token` ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)).
   - Мониторинг Windows 11: нативные Win32/PDH API через `windows-sys` (изолированный FFI в `crates/monitoring`) + портативный mock/адаптер для тестов и Linux CI ([ADR-0006](docs/architecture/adr/0006-monitoring-win32-pdh.md)).
@@ -18,9 +18,8 @@
 
 ## Что делать следующим (Шаги Этапа 1)
 
-1. **PR 1.1 (`crates/monitoring`):** реализовать Windows 11 сборщик метрик поверх `windows-sys` (`CPU`, `RAM`, `Disk`, `Network`, `Battery`, `Uptime`) с RAII-обёртками и тестами.
-2. **PR 1.2 (`crates/transport`):** реализовать PIN/QR pairing, хранилище хэшей `device_token`, генерацию TLS-сертификата + `axum` WSS-сервер и протокол сообщений.
-3. **PR 1.3 (`crates/core`):** собрать асинхронный цикл `nexdeck-agent` (`tokio` `current_thread`), сохранение конфига, автозапуск в реестре Windows и измерение потребления RAM (цель 2–5 МБ в простое).
+1. **PR 1.2 (`crates/transport`):** реализовать PIN/QR pairing, хранилище хэшей `device_token`, генерацию TLS-сертификата + `axum` WSS-сервер и протокол сообщений.
+2. **PR 1.3 (`crates/core`):** собрать асинхронный цикл `nexdeck-agent` (`tokio` `current_thread`), сохранение конфига, автозапуск в реестре Windows и измерение потребления RAM (цель 2–5 МБ в простое).
 
 ---
 

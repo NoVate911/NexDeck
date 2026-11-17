@@ -1,11 +1,18 @@
 [package]
 name = "nexdeck-monitoring"
-description = "Hardware telemetry models and collector traits for NexDeck"
+description = "Hardware telemetry models and Windows 11 native collectors for NexDeck"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[lints]
-workspace = true
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
