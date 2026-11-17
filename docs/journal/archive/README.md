@@ -7,3 +7,4 @@
 - [Этап 0 — Подготовка и настройка репозитория](stage-0.md)
 - [Этап 1 — Core Agent (мониторинг, WSS-сервер, pairing, runtime и автозапуск)](stage-1.md)
 - [Этап 2 — Mobile Client (Flutter-клиент, TLS-пиннинг, графики телеметрии и мультимедиа-управление)](stage-2.md)
+- [Этап 3 — Widget Engine и Desktop Manager (`crates/api`, `apps/desktop`, `apps/mobile`)](stage-3.md)

@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### Добавлено
+- Динамический Widget Engine и редактор панелей в `apps/mobile` (`DeckStore` / `FileDeckStore` для `panels.json`, `DeckController` с троттлингом `refreshIntervalMs`, `DeckPanelView`, `DeckWidgetCard` для 9 типов виджетов и модальные редакторы стилей/привязок/JSON во вкладке «Панели» `DashboardScreen`).
 - Отдельный GUI-менеджер `nexdeck-desktop` на чистом Rust (`apps/desktop`, `eframe 0.33` / `glow`): визуальный редактор сетки панелей и виджетов (`panels.json`) с контролем коллизий и экспортом/импортом JSON, редактор настроек `config.json`, управление автозапуском `HKCU\...\Run`, запуск/остановка локального `nexdeck-agent` (включая режим `--pair` с извлечением PIN/QR), отзыв устройств (`devices.json`) и управление TLS-отпечатком.
 - Кросс-платформенные модели конструктора панелей и виджетов (`DeckConfig`, `PanelConfig`, `WidgetSpec`, `WidgetKind`, `WidgetStyle`, валидация коллизий сетки, импорт/экспорт JSON) в `crates/api` и `apps/mobile`, сохранение `panels.json` в `crates/core` и пример `examples/panel_default.json`.
 - Визуализация телеметрии в реальном времени (`TelemetryLineChart` на `CustomPainter` для CPU, RAM и сети TX/RX, раскрываемая детализация по ядрам CPU, GPU VRAM и трафик интерфейсов) и панель управления мультимедиа/громкостью в `apps/mobile`.
