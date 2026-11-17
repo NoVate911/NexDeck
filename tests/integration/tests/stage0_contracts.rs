@@ -8,7 +8,9 @@ use nexdeck_api::{
 };
 use nexdeck_approval::{ApprovalError, ApprovalStatus, RiskLevel};
 use nexdeck_core::{AgentConfig, CoreAgent};
-use nexdeck_monitoring::MemoryMetrics;
+use nexdeck_monitoring::{
+    CpuMetrics, MemoryMetrics, MetricCollector, StaticCollector, SystemSnapshot, default_collector,
+};
 use nexdeck_notifications::{NotificationFilter, NotificationPriority};
 use nexdeck_plugin_engine::{PluginManifest, PluginPermission, PluginRuntimeKind, ResourceLimits};
 use nexdeck_transport::{Envelope, MessageKind};
@@ -86,4 +88,48 @@ fn transport_monitoring_and_plugin_contracts_validate() {
         limits: ResourceLimits::default(),
     };
     assert_eq!(plugin.validate(), Ok(()));
+}
+
+#[test]
+fn monitoring_static_and_platform_collectors_integrate_with_core() {
+    let mut agent = CoreAgent::new(AgentConfig::default()).expect("default config should be valid");
+    let sample = SystemSnapshot {
+        captured_at_epoch_ms: 1_000,
+        uptime_secs: 120,
+        cpu: CpuMetrics {
+            total_usage_pct: 18.5,
+            per_core_usage_pct: vec![15.0, 22.0],
+            frequency_mhz: Some(3_800),
+            temperature_celsius: None,
+        },
+        memory: MemoryMetrics {
+            total_bytes: 16 * 1024 * 1024 * 1024,
+            used_bytes: 4 * 1024 * 1024 * 1024,
+        },
+        gpus: Vec::new(),
+        disks: Vec::new(),
+        networks: Vec::new(),
+        battery: None,
+    };
+
+    let mut static_collector = StaticCollector::new(sample.clone());
+    let collected = static_collector
+        .collect()
+        .expect("static collector should succeed");
+    agent.record_snapshot(collected);
+    assert_eq!(agent.latest_snapshot(), Some(&sample));
+
+    let mut platform = default_collector().expect("default_collector should initialize");
+    #[cfg(windows)]
+    {
+        let live = platform
+            .collect()
+            .expect("Windows collector should sample metrics");
+        assert!(live.memory.total_bytes > 0);
+        assert!(live.uptime_secs > 0);
+    }
+    #[cfg(not(windows))]
+    {
+        assert!(platform.collect().is_err());
+    }
 }

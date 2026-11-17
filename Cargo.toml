@@ -27,6 +27,16 @@ nexdeck-monitoring = { version = "0.1.0", path = "crates/monitoring" }
 nexdeck-notifications = { version = "0.1.0", path = "crates/notifications" }
 nexdeck-plugin-engine = { version = "0.1.0", path = "crates/plugin_engine" }
 nexdeck-transport = { version = "0.1.0", path = "crates/transport" }
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Performance",
+    "Win32_System_Power",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+] }
 
 [workspace.lints.rust]
 missing_docs = "warn"
