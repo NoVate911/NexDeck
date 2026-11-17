@@ -33,7 +33,9 @@
    При подключении `rustls` + `ring` в `deny.toml` понадобится `OpenSSL` в allow-листе (или `[[licenses.clarify]]` для `ring`) — обязательно проверять `cargo deny check` на PR.
 4. **Локальная среда Windows без C++ Build Tools (`link.exe not found`):**  
    Пока на ПК не завершена установка «Разработка классических приложений на C++», локально проверяем `cargo fmt`, `cargo check`, `cargo clippy` и `cargo doc`, а линковка/тесты прогоняются в CI.
-5. **Данные в коде и документации:**  
+5. **CodeQL `rust/access-invalid-pointer` при работе с Win32 out-pointer:**  
+   Не разыменовывать голый `*mut T`, инициализированный через `null_mut()`, после составного `if status != 0 || ptr.is_null()`; оборачивать указатель через `NonNull::new(raw_ptr)` в RAII-обёртку и читать данные через заимствующий метод `&self`.
+6. **Данные в коде и документации:**  
    Только синтетические примеры (`ExampleApp`, `org.example.*`, `localhost`, стандартные порты). Файл `TZ.md` не добавлять в Git.
 
 ---

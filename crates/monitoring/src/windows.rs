@@ -4,12 +4,12 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
-use std::ptr::{null, null_mut};
+use std::ptr::{NonNull, null, null_mut};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use windows_sys::Win32::Foundation::FILETIME;
 use windows_sys::Win32::NetworkManagement::IpHelper::{
-    FreeMibTable, GetIfTable2, IF_TYPE_SOFTWARE_LOOPBACK, MIB_IF_TABLE2,
+    FreeMibTable, GetIfTable2, IF_TYPE_SOFTWARE_LOOPBACK, MIB_IF_ROW2, MIB_IF_TABLE2,
 };
 use windows_sys::Win32::NetworkManagement::Ndis::IfOperStatusUp;
 use windows_sys::Win32::Storage::FileSystem::{
@@ -53,14 +53,29 @@ impl Drop for PdhQueryGuard {
 }
 
 /// RAII wrapper ensuring `FreeMibTable` always releases `GetIfTable2` allocations.
-struct MibTableGuard(*mut MIB_IF_TABLE2);
+struct MibTableGuard(NonNull<MIB_IF_TABLE2>);
+
+impl MibTableGuard {
+    /// Borrows the interface rows while keeping the underlying MIB table alive.
+    ///
+    /// # Safety
+    ///
+    /// The wrapped pointer must come from a successful `GetIfTable2` call and
+    /// remain valid for the lifetime of `&self`.
+    unsafe fn rows(&self) -> &[MIB_IF_ROW2] {
+        let table = unsafe { self.0.as_ref() };
+        let count = table.NumEntries as usize;
+        if count == 0 {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(table.Table.as_ptr(), count) }
+    }
+}
 
 impl Drop for MibTableGuard {
     fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe {
-                FreeMibTable(self.0.cast());
-            }
+        unsafe {
+            FreeMibTable(self.0.as_ptr().cast());
         }
     }
 }
@@ -238,24 +253,27 @@ impl WindowsCollector {
     }
 
     fn collect_networks(&mut self) -> Result<Vec<NetworkMetrics>, MonitoringError> {
-        let mut table_ptr: *mut MIB_IF_TABLE2 = null_mut();
-        let status = unsafe { GetIfTable2(&mut table_ptr) };
-        if status != 0 || table_ptr.is_null() {
+        let mut raw_table: *mut MIB_IF_TABLE2 = null_mut();
+        let status = unsafe { GetIfTable2(&mut raw_table) };
+        if status != 0 {
             return Err(MonitoringError::CollectionFailed(format!(
                 "GetIfTable2 failed with error {status}"
             )));
         }
-        let _guard = MibTableGuard(table_ptr);
+        let Some(table_ptr) = NonNull::new(raw_table) else {
+            return Err(MonitoringError::CollectionFailed(
+                "GetIfTable2 returned a null table pointer".to_owned(),
+            ));
+        };
+        let guard = MibTableGuard(table_ptr);
 
         let now = Instant::now();
         let elapsed_secs = self
             .prev_net_at
             .map_or(0.0, |prev| now.duration_since(prev).as_secs_f64());
 
-        let count = unsafe { (*table_ptr).NumEntries as usize };
-        let rows = unsafe { std::slice::from_raw_parts((*table_ptr).Table.as_ptr(), count) };
-
-        let mut next_bytes = HashMap::with_capacity(count);
+        let rows = unsafe { guard.rows() };
+        let mut next_bytes = HashMap::with_capacity(rows.len());
         let mut interfaces = Vec::new();
 
         for row in rows {
