@@ -67,64 +67,71 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       body: SafeArea(
-        child: _selectedTabIndex == 0
-            ? ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  _ConnectionBanner(
-                    session: session,
-                    controller: widget.controller,
-                  ),
-                  const SizedBox(height: 12),
-                  _MediaControlsCard(controller: widget.controller),
-                  const SizedBox(height: 12),
-                  if (snapshot == null)
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(20),
-                        child: Text(
-                          'Ожидание первого снимка телеметрии от nexdeck-agent…',
-                        ),
-                      ),
-                    )
-                  else ...[
-                    _CpuCard(
-                      cpu: snapshot.cpu,
-                      uptimeSecs: snapshot.uptimeSecs,
-                      history: widget.controller.cpuHistory,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          child: _selectedTabIndex == 0
+              ? ListView(
+                  key: const ValueKey('monitoring_tab_view'),
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    _ConnectionBanner(
+                      session: session,
+                      controller: widget.controller,
                     ),
                     const SizedBox(height: 12),
-                    _MemoryCard(
-                      memory: snapshot.memory,
-                      history: widget.controller.ramHistory,
-                    ),
-                    if (snapshot.gpus.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      _GpuSection(gpus: snapshot.gpus),
-                    ],
-                    if (snapshot.disks.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      _DiskSection(disks: snapshot.disks),
-                    ],
-                    if (snapshot.networks.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      _NetworkSection(
-                        networks: snapshot.networks,
-                        rxHistoryKib: widget.controller.networkRxKibHistory,
-                        txHistoryKib: widget.controller.networkTxKibHistory,
+                    _MediaControlsCard(controller: widget.controller),
+                    const SizedBox(height: 12),
+                    if (snapshot == null)
+                      const Card(
+                        child: Padding(
+                          padding: EdgeInsets.all(20),
+                          child: Text(
+                            'Ожидание первого снимка телеметрии от nexdeck-agent…',
+                          ),
+                        ),
+                      )
+                    else ...[
+                      _CpuCard(
+                        cpu: snapshot.cpu,
+                        uptimeSecs: snapshot.uptimeSecs,
+                        history: widget.controller.cpuHistory,
                       ),
-                    ],
-                    if (snapshot.battery != null) ...[
                       const SizedBox(height: 12),
-                      _BatteryCard(battery: snapshot.battery!),
+                      _MemoryCard(
+                        memory: snapshot.memory,
+                        history: widget.controller.ramHistory,
+                      ),
+                      if (snapshot.gpus.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        _GpuSection(gpus: snapshot.gpus),
+                      ],
+                      if (snapshot.disks.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        _DiskSection(disks: snapshot.disks),
+                      ],
+                      if (snapshot.networks.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        _NetworkSection(
+                          networks: snapshot.networks,
+                          rxHistoryKib: widget.controller.networkRxKibHistory,
+                          txHistoryKib: widget.controller.networkTxKibHistory,
+                        ),
+                      ],
+                      if (snapshot.battery != null) ...[
+                        const SizedBox(height: 12),
+                        _BatteryCard(battery: snapshot.battery!),
+                      ],
                     ],
                   ],
-                ],
-              )
-            : DeckPanelView(
-                agentController: widget.controller,
-                deckController: widget.deckController,
-              ),
+                )
+              : DeckPanelView(
+                  key: const ValueKey('panels_tab_view'),
+                  agentController: widget.controller,
+                  deckController: widget.deckController,
+                ),
+        ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedTabIndex,

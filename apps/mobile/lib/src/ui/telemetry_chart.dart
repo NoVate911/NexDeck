@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:material_ui/material_ui.dart';
 
@@ -21,7 +22,8 @@ class ChartSeries {
   final List<double> values;
 }
 
-/// Lightweight custom-painted real-time sparkline/area chart with zero third-party deps.
+/// Lightweight custom-painted real-time sparkline/area chart with smooth cubic
+/// Bézier curves, gradient area shading, and a glowing current-value indicator.
 class TelemetryLineChart extends StatelessWidget {
   /// Creates a [TelemetryLineChart].
   const TelemetryLineChart({
@@ -97,7 +99,7 @@ class TelemetryLineChart extends StatelessWidget {
           height: height,
           decoration: BoxDecoration(
             color: theme.colorScheme.surfaceContainerLowest,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: theme.colorScheme.outlineVariant),
           ),
           clipBehavior: Clip.antiAlias,
@@ -106,7 +108,7 @@ class TelemetryLineChart extends StatelessWidget {
               series: series,
               maxY: maxY,
               gridColor: theme.colorScheme.outlineVariant.withValues(
-                alpha: 0.45,
+                alpha: 0.40,
               ),
             ),
             child: const SizedBox.expand(),
@@ -145,55 +147,62 @@ class _TelemetryChartPainter extends CustomPainter {
         continue;
       }
 
-      final linePath = Path();
-      final fillPath = Path();
       final count = item.values.length;
-
+      final points = <Offset>[];
       if (count == 1) {
         final onlyY =
             size.height -
             (item.values.first.clamp(0.0, safeMaxY) / safeMaxY) *
-                (size.height - 6) -
-            3;
-        linePath.moveTo(0, onlyY);
-        linePath.lineTo(size.width, onlyY);
-        fillPath
-          ..moveTo(0, size.height)
-          ..lineTo(0, onlyY)
-          ..lineTo(size.width, onlyY)
-          ..lineTo(size.width, size.height)
-          ..close();
+                (size.height - 8) -
+            4;
+        points.add(Offset(0, onlyY));
+        points.add(Offset(size.width, onlyY));
       } else {
         for (var i = 0; i < count; i++) {
           final x = (i / math.max(1, count - 1)) * size.width;
           final clamped = item.values[i].clamp(0.0, safeMaxY);
-          final y = size.height - (clamped / safeMaxY) * (size.height - 6) - 3;
-          if (i == 0) {
-            linePath.moveTo(x, y);
-            fillPath.moveTo(x, size.height);
-            fillPath.lineTo(x, y);
-          } else {
-            linePath.lineTo(x, y);
-            fillPath.lineTo(x, y);
-          }
+          final y = size.height - (clamped / safeMaxY) * (size.height - 8) - 4;
+          points.add(Offset(x, y));
         }
-        fillPath
-          ..lineTo(size.width, size.height)
-          ..close();
       }
 
+      final linePath = Path()..moveTo(points.first.dx, points.first.dy);
+      for (var i = 0; i < points.length - 1; i++) {
+        final p0 = points[i];
+        final p1 = points[i + 1];
+        final controlX = (p0.dx + p1.dx) / 2;
+        linePath.cubicTo(controlX, p0.dy, controlX, p1.dy, p1.dx, p1.dy);
+      }
+
+      final fillPath = Path.from(linePath)
+        ..lineTo(points.last.dx, size.height)
+        ..lineTo(points.first.dx, size.height)
+        ..close();
+
       final fillPaint = Paint()
-        ..color = item.color.withValues(alpha: 0.16)
+        ..shader = ui.Gradient.linear(Offset(0, 0), Offset(0, size.height), [
+          item.color.withValues(alpha: 0.30),
+          item.color.withValues(alpha: 0.02),
+        ])
         ..style = PaintingStyle.fill;
       canvas.drawPath(fillPath, fillPaint);
 
       final linePaint = Paint()
         ..color = item.color
-        ..strokeWidth = 2.0
+        ..strokeWidth = 2.2
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round;
       canvas.drawPath(linePath, linePaint);
+
+      // Glowing live tip indicator on the newest sample
+      final tip = points.last;
+      canvas.drawCircle(
+        tip,
+        5.5,
+        Paint()..color = item.color.withValues(alpha: 0.28),
+      );
+      canvas.drawCircle(tip, 2.8, Paint()..color = item.color);
     }
   }
 

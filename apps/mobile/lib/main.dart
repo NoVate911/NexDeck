@@ -97,24 +97,91 @@ class _NexDeckAppState extends State<NexDeckApp> {
 
   @override
   Widget build(BuildContext context) {
+    final baseScheme =
+        ColorScheme.fromSeed(
+          seedColor: const Color(0xFF3B82F6),
+          brightness: Brightness.dark,
+        ).copyWith(
+          primary: const Color(0xFF3B82F6),
+          secondary: const Color(0xFF60A5FA),
+          surface: const Color(0xFF161D29),
+          surfaceContainerLowest: const Color(0xFF0F141E),
+          surfaceContainerLow: const Color(0xFF161D29),
+          surfaceContainer: const Color(0xFF1B2433),
+          surfaceContainerHigh: const Color(0xFF222D40),
+          outlineVariant: const Color(0xFF283548),
+        );
+
     return MaterialApp(
       title: 'NexDeck',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0EA5E9),
-          brightness: Brightness.dark,
-        ),
+        colorScheme: baseScheme,
+        scaffoldBackgroundColor: const Color(0xFF0D1117),
         useMaterial3: true,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF0D1117),
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          centerTitle: false,
+          titleTextStyle: TextStyle(
+            fontSize: 19,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFFF1F5F9),
+            letterSpacing: -0.2,
+          ),
+        ),
+        cardTheme: CardThemeData(
+          color: const Color(0xFF161D29),
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          margin: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: const BorderSide(color: Color(0xFF283548)),
+          ),
+        ),
+        navigationBarTheme: NavigationBarThemeData(
+          backgroundColor: const Color(0xFF121823),
+          surfaceTintColor: Colors.transparent,
+          indicatorColor: const Color(0x333B82F6),
+          height: 66,
+          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0xFF111722),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFF283548)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFF283548)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFF3B82F6), width: 1.5),
+          ),
+        ),
       ),
       home: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
-          if (_controller.session == null) {
-            return PairingScreen(controller: _controller);
-          }
-          return DashboardScreen(
-            controller: _controller,
-            deckController: _deckController,
+          return AnimatedSwitcher(
+            duration: const Duration(milliseconds: 240),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            child: _controller.session == null
+                ? PairingScreen(
+                    key: const ValueKey('pairing_screen'),
+                    controller: _controller,
+                  )
+                : DashboardScreen(
+                    key: const ValueKey('dashboard_screen'),
+                    controller: _controller,
+                    deckController: _deckController,
+                  ),
           );
         },
       ),

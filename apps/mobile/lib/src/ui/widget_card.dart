@@ -71,8 +71,9 @@ String formatTelemetryValue(
   };
 }
 
-/// Renders a single [WidgetSpec] inside the dynamic panel grid.
-class DeckWidgetCard extends StatelessWidget {
+/// Renders a single [WidgetSpec] inside the dynamic panel grid with smooth
+/// tactile press-scale and selection micro-animations.
+class DeckWidgetCard extends StatefulWidget {
   /// Creates a [DeckWidgetCard].
   const DeckWidgetCard({
     required this.spec,
@@ -111,6 +112,22 @@ class DeckWidgetCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
+  State<DeckWidgetCard> createState() => _DeckWidgetCardState();
+}
+
+class _DeckWidgetCardState extends State<DeckWidgetCard> {
+  bool _pressed = false;
+
+  WidgetSpec get spec => widget.spec;
+  SystemSnapshot? get snapshot => widget.snapshot;
+  List<double> get history => widget.history;
+  bool get isConnected => widget.isConnected;
+  bool get isEditMode => widget.isEditMode;
+  bool get isSelected => widget.isSelected;
+  bool get isToggleActive => widget.isToggleActive;
+  VoidCallback? get onTap => widget.onTap;
+
+  @override
   Widget build(BuildContext context) {
     final bgColor = parsePanelHexColor(spec.style.backgroundHex);
     final fgColor = parsePanelHexColor(
@@ -128,26 +145,48 @@ class DeckWidgetCard extends StatelessWidget {
         spec.kind == WidgetKind.toggle ||
         spec.action.type != WidgetActionType.none;
 
-    return Material(
-      color: bgColor,
-      borderRadius: radius,
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        key: Key('panel_widget_${spec.id}'),
-        onTap: interactive ? onTap : null,
+    return AnimatedScale(
+      scale: _pressed && interactive ? 0.96 : 1.0,
+      duration: const Duration(milliseconds: 130),
+      curve: Curves.easeOutCubic,
+      child: Material(
+        color: bgColor,
         borderRadius: radius,
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: radius,
-            border: Border.all(
-              color: isSelected
-                  ? Colors.white
-                  : accentColor.withValues(alpha: isEditMode ? 0.85 : 0.45),
-              width: isSelected ? 2.4 : 1.1,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: Key('panel_widget_${spec.id}'),
+          onTap: interactive ? onTap : null,
+          onHighlightChanged: interactive
+              ? (value) {
+                  if (_pressed != value) {
+                    setState(() => _pressed = value);
+                  }
+                }
+              : null,
+          borderRadius: radius,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            decoration: BoxDecoration(
+              borderRadius: radius,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withValues(alpha: 0.04),
+                  Colors.transparent,
+                ],
+              ),
+              border: Border.all(
+                color: isSelected
+                    ? Colors.white
+                    : accentColor.withValues(alpha: isEditMode ? 0.85 : 0.45),
+                width: isSelected ? 2.4 : 1.1,
+              ),
             ),
+            padding: const EdgeInsets.all(10),
+            child: _buildBody(context, fgColor, accentColor),
           ),
-          padding: const EdgeInsets.all(10),
-          child: _buildBody(context, fgColor, accentColor),
         ),
       ),
     );
