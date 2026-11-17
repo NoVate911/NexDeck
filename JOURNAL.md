@@ -6,9 +6,9 @@
 
 ## Текущее состояние
 
-- **Актуальный этап:** Этап 3 (Widget Engine и Desktop Manager) — **выполнен PR 3.1 (кросс-платформенные модели конструктора панелей и хранилище `panels.json`)**.
+- **Актуальный этап:** Этап 3 (Widget Engine и Desktop Manager) — **выполнен PR 3.2 (Desktop Manager `apps/desktop` на чистом Rust `egui / eframe`)**.
 - **Версия workspace:** `0.1.0` (Rust Edition 2024, `rust-version = "1.88"`; Flutter `3.50.0` / Dart `3.14.0` в `apps/mobile`).
-- **Последний выполненный шаг:** реализованы синхронные модели панелей и виджетов (`DeckConfig`, `PanelConfig`, `WidgetSpec`, `WidgetKind`, `WidgetStyle`, `TelemetryBinding`, `WidgetAction`) в `crates/api/src/panels.rs` и `apps/mobile/lib/src/models/panel_models.dart`, сохранение `panels.json` в `crates/core/src/storage.rs` и пример `examples/panel_default.json` с перекрёстной проверкой идентичности JSON.
+- **Последний выполненный шаг:** реализован чистый Rust GUI-конфигуратор `nexdeck-desktop` (`apps/desktop/src/main.rs`, `state.rs`, `ui.rs` на `eframe 0.33.3` / `glow`): конструктор сетки панелей и виджетов (`panels.json`) с контролем коллизий и импортом/экспортом JSON, редактор `config.json`, автозапуск `nexdeck-agent` в `HKCU\...\Run`, запуск/остановка локального процесса агента (обычный и `--pair` с показом PIN/QR), отзыв устройств (`devices.json`), просмотр/перевыпуск TLS SHA-256 отпечатка и обновление `deny.toml` под зависимости `eframe`.
 - **Фактические показатели `nexdeck-agent.exe` (release, LTO + strip):** размер `1 743 872` байт (`~1.66 MiB`); `--measure-ram` — `private=1.23 MiB`, `working_set=6.44 MiB`.
 - **Согласованные решения:**
   - Сеть и сервер: `tokio` (`current_thread`) + `axum` + `rustls` WSS с пиннингом SHA-256 отпечатка и PIN/QR-pairing ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)).
@@ -19,8 +19,8 @@
 
 ## Что делать следующим (Этап 3 — Widget Engine и Desktop Manager)
 
-1. **PR 3.2 (`apps/desktop` на чистом Rust `egui / eframe`):** реализовать отдельный GUI-конфигуратор для Windows 11 — настройка `config.json`, автозапуск, управление списком сопряжённых устройств (`devices.json`), визуальный редактор панелей (`panels.json`) и импорт/экспорт конфигураций.
-2. **PR 3.3 (`apps/mobile` Widget Engine):** динамический рендерер настраиваемых панелей и виджетов (текст, числа, кнопки действий, переключатели, графики, индикаторы, иконки) с локальным сохранением и импортом/экспортом.
+1. **PR 3.3 (`apps/mobile` Widget Engine):** динамический рендерер настраиваемых панелей и виджетов (текст, числа, кнопки действий, переключатели, графики, индикаторы, иконки) на базе `DeckConfig` / `PanelConfig` с локальным сохранением и импортом/экспортом JSON.
+2. **Этап 4 (Уведомления и команды подтверждения):** интеграция `crates/notifications` (пересылка toast-уведомлений в фоне и буферизация при сне) и `crates/approval` (одноразовые запросы подтверждения с проверкой границ безопасности и без обхода UAC).
 
 ---
 
@@ -42,6 +42,8 @@
    Только синтетические примеры (`ExampleApp`, `org.example.*`, `127.0.0.1`, стандартные порты). Файл `TZ.md` не добавлять в Git.
 8. **`Dependency Review` для `pubspec.lock` (нижний регистр SPDX):**  
    GitHub Dependency Graph возвращает для `pub` лицензии в нижнем регистре (`apache-2.0`, `bsd-3-clause`, `mit`), из-за чего `spdx-expression-parse` внутри `dependency-review-action` отклоняет их как `unresolved`. При добавлении новых Dart/Flutter-зависимостей сначала проверить их реальную лицензию на совместимость с `Apache-2.0`, затем добавить `pkg:pub/<name>` в `allow-dependencies-licenses` в `.github/workflows/dependency-review.yml` (не отключая `deny-licenses` и `fail-on-severity`).
+9. **`egui 0.33` (`eframe`), цвет ARGB и `deny.toml`:**  
+   `egui::Color32` использует premultiplied alpha и искажает RGB при конвертации полупрозрачных `#AARRGGBB`: для редактора цвета использовать `color_edit_button_srgba_unmultiplied(&mut [u8; 4])`. В `eframe 0.33` устаревший `Slider::clamp_to_range(true)` заменён на `Slider::clamping(SliderClamping::Always)`, а в `Stroke::new` требуется явный `f32` (`1.0_f32`). При обновлении GUI-стека проверять `deny.toml`: `epaint_default_fonts` требует `OFL-1.1` + `Ubuntu-font-1.0`, `clipboard-win`/`error-code` — `BSL-1.0`, а `winit`/`smithay-client-toolkit` на Linux имеют легальные транзитивные дубли (`calloop`, `rustix`, `thiserror 1.x`).
 
 ---
 
