@@ -6,9 +6,9 @@
 
 ## Текущее состояние
 
-- **Актуальный этап:** Этап 4 (Universal API) **завершён**, выполнен редизайн UI/UX в стиле **Clean Modern (Fluent / macOS)** и скрытие консольного окна (`Issue #34`); следующим начинается **Этап 5 (Remote Approval и Центр уведомлений)**.
+- **Актуальный этап:** Этап 4 (Universal API) **завершён**, выполнен UX/UI-апгрейд с подключением в 1 клик (визуальный QR-код + PIN) и Drag-and-Drop конструктором виджетов (`Issue #36`); следующим начинается **Этап 5 (Remote Approval и Центр уведомлений)**.
 - **Версия workspace:** `0.1.0` (Rust Edition 2024, `rust-version = "1.88"`; Flutter `3.50.0` / Dart `3.14.0` в `apps/mobile`).
-- **Последний выполненный шаг:** выполнен редизайн `apps/desktop` и `apps/mobile` в стиле Clean Modern (боковая навигация с микро-анимациями `ctx.animate_bool_with_time`, матовые карточки `fluent_card`, переключатель тёмной/светлой темы на ПК; сглаженные кривые Безье на графиках `TelemetryLineChart`, `AnimatedSwitcher` переходов и тактильное масштабирование `AnimatedScale` на плитках в `apps/mobile`), а также отключено открытие окна командной строки при запуске `nexdeck-desktop.exe` (`windows_subsystem = "windows"`) и дочернего `nexdeck-agent.exe` (`CREATE_NO_WINDOW`).
+- **Последний выполненный шаг:** реализованы подключение телефона в 1 кнопку с векторным генератором QR-кода (`apps/desktop/src/qr.rs`), автоопределением локального LAN IPv4 адреса и автопоиском отпечатка сертификата по PIN в `apps/mobile`; полноценный Drag-and-Drop конструктор виджетов мышью на ПК (перетаскивание пресетов из каталога `WidgetPreset`, перемещение/обмен плиток на экране смартфона, изменение размера за правый нижний угол, мгновенное автосохранение и цветовые темы в 1 клик) и перетаскивание виджетов пальцем (`LongPressDraggable` + `DragTarget`) в `apps/mobile`.
 - **Фактические показатели `nexdeck-agent.exe` (release, LTO + strip):** размер `1 743 360` байт (`~1.66 MiB`); `--measure-ram` — `private=1.23 MiB`, `working_set=6.44 MiB`. `nexdeck-desktop.exe` — `3 614 720` байт.
 - **Согласованные решения:**
   - Сеть и сервер: `tokio` (`current_thread`) + `axum` + `rustls` WSS с пиннингом SHA-256 отпечатка и PIN/QR-pairing ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)), Universal API `/api/v1/*` поверх `axum` ([ADR-0007](docs/architecture/adr/0007-universal-api-http-ws-axum.md)).

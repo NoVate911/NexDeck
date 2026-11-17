@@ -405,6 +405,64 @@ class DeckController extends ChangeNotifier {
     return updateWidget(widget.copyWith(col: nextCol, row: nextRow));
   }
 
+  /// Moves or swaps [widgetId] to `(targetCol, targetRow)` during touch drag-and-drop.
+  Future<bool> moveWidgetToCell(
+    String widgetId,
+    int targetCol,
+    int targetRow,
+  ) async {
+    final panel = activePanel;
+    final srcIdx = panel.widgets.indexWhere((w) => w.id == widgetId);
+    if (srcIdx < 0) {
+      return false;
+    }
+    final src = panel.widgets[srcIdx];
+    final clampedCol = targetCol.clamp(
+      0,
+      (panel.columns - src.colSpan).clamp(0, panel.columns),
+    );
+    final clampedRow = targetRow < 0 ? 0 : targetRow;
+    if (clampedCol == src.col && clampedRow == src.row) {
+      _selectedWidgetId = widgetId;
+      _safeNotify();
+      return true;
+    }
+
+    final moved = src.copyWith(col: clampedCol, row: clampedRow);
+    final colliding = <int>[];
+    for (var i = 0; i < panel.widgets.length; i++) {
+      if (i != srcIdx && moved.overlaps(panel.widgets[i])) {
+        colliding.add(i);
+      }
+    }
+
+    final nextWidgets = List<WidgetSpec>.of(panel.widgets);
+    if (colliding.isEmpty) {
+      nextWidgets[srcIdx] = moved;
+    } else if (colliding.length == 1) {
+      final dstIdx = colliding.single;
+      final dst = panel.widgets[dstIdx];
+      if (dst.colSpan == src.colSpan && dst.rowSpan == src.rowSpan) {
+        nextWidgets[srcIdx] = src.copyWith(col: dst.col, row: dst.row);
+        nextWidgets[dstIdx] = dst.copyWith(col: src.col, row: src.row);
+      } else {
+        return false;
+      }
+    } else {
+      return false;
+    }
+
+    final saved = await _replacePanel(
+      panel.copyWith(widgets: nextWidgets),
+      statusNote: 'Виджет «${src.title}» перемещён.',
+    );
+    if (saved) {
+      _selectedWidgetId = widgetId;
+      _safeNotify();
+    }
+    return saved;
+  }
+
   /// Resizes the currently selected widget without leaving bounds or overlapping others.
   Future<bool> resizeSelectedWidget(int deltaColSpan, int deltaRowSpan) async {
     final widget = selectedWidget;

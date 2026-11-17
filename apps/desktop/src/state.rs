@@ -330,6 +330,7 @@ impl SettingsDraft {
 
 /// Complete Desktop Manager state persisted across [`StoragePaths`].
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct DesktopManagerState {
     /// Active storage layout (`config.json`, `devices.json`, `panels.json`, TLS PEM/sha256).
     pub paths: StoragePaths,
@@ -381,6 +382,7 @@ pub struct DesktopManagerState {
     pub error_message: Option<String>,
 }
 
+#[allow(dead_code)]
 impl DesktopManagerState {
     /// Loads settings, devices, TLS identity, panel layout, and autostart state from `paths`.
     ///
@@ -605,6 +607,51 @@ impl DesktopManagerState {
         self.clear_alerts();
         self.agent_process.stop();
         self.status_message = Some("Команда остановки отправлена агенту.".to_owned());
+    }
+
+    /// Starts or restarts `nexdeck-agent` in pairing mode (`--pair`) in one click,
+    /// switching `127.0.0.1` to `0.0.0.0` if a LAN IP is detected so Wi-Fi phones can reach the PC.
+    pub fn connect_phone_one_click(&mut self) {
+        self.clear_alerts();
+        if self.settings.bind_addr.starts_with("127.0.0.1:")
+            && detect_lan_ipv4().is_some()
+            && let Some(port) = self.settings.bind_addr.strip_prefix("127.0.0.1:")
+        {
+            let updated_bind = format!("0.0.0.0:{port}");
+            self.settings.bind_addr.clone_from(&updated_bind);
+            self.settings_draft.bind_addr = updated_bind;
+            let _ = self.paths.save_settings(&self.settings);
+        }
+
+        if self.agent_process.is_running() {
+            if self.agent_process.is_pair_mode()
+                && self.agent_process.latest_pairing_info().0.is_some()
+            {
+                return;
+            }
+            self.agent_process.stop();
+        }
+        self.pair_ttl_secs = self.pair_ttl_secs.max(300);
+        self.start_agent(true);
+    }
+
+    /// Returns `(pin, display_host_port, qr_json)` with the PC's LAN IP substituted when available.
+    #[must_use]
+    pub fn resolved_pairing_qr_payload(&self) -> Option<(String, String, String)> {
+        let (pin, raw_json) = self.agent_process.latest_pairing_info();
+        let pin = pin?;
+        let raw_json = raw_json?;
+        let Ok(mut payload) = serde_json::from_str::<PairingQrPayload>(&raw_json) else {
+            return Some((pin, self.settings.bind_addr.clone(), raw_json));
+        };
+        if (payload.host == "127.0.0.1" || payload.host == "0.0.0.0" || payload.host == "localhost")
+            && let Some(lan_ip) = detect_lan_ipv4()
+        {
+            payload.host = lan_ip;
+        }
+        let host_port = format!("{}:{}", payload.host, payload.port);
+        let final_json = serde_json::to_string(&payload).unwrap_or(raw_json);
+        Some((pin, host_port, final_json))
     }
 
     /// Revokes a paired mobile device by identifier and updates `devices.json`.
@@ -908,6 +955,11 @@ impl DesktopManagerState {
 
     /// Places a newly constructed widget of `kind` into the first non-overlapping cell.
     pub fn add_widget(&mut self, kind: WidgetKind) {
+        self.add_widget_at(kind, None);
+    }
+
+    /// Places a newly constructed widget of `kind` at `target_cell` (or the first free cell).
+    pub fn add_widget_at(&mut self, kind: WidgetKind, target_cell: Option<(u16, u16)>) {
         self.clear_alerts();
         let mut candidate = self.deck.clone();
         let Some(panel) = candidate.panels.get_mut(self.selected_panel_idx) else {
@@ -915,7 +967,22 @@ impl DesktopManagerState {
         };
 
         let (default_col_span, default_row_span) = default_spans_for_kind(kind, panel.columns);
-        let Some((col, row)) = find_free_cell(panel, default_col_span, default_row_span) else {
+        let placement = target_cell
+            .and_then(|(c, r)| {
+                let clamped_c = c.min(panel.columns.saturating_sub(default_col_span));
+                is_region_free(
+                    panel,
+                    None,
+                    clamped_c,
+                    r,
+                    default_col_span,
+                    default_row_span,
+                )
+                .then_some((clamped_c, r))
+            })
+            .or_else(|| find_free_cell(panel, default_col_span, default_row_span));
+
+        let Some((col, row)) = placement else {
             self.error_message = Some("Не найдена свободная ячейка в сетке панели.".to_owned());
             return;
         };
@@ -932,12 +999,192 @@ impl DesktopManagerState {
         );
         panel.widgets.push(spec);
 
-        if let Err(msg) = self.commit_deck(candidate, Some("Виджет добавлен на сетку панели."))
+        if let Err(msg) = self.commit_deck(candidate, Some("Виджет добавлен на панель."))
         {
             self.error_message = Some(msg);
             return;
         }
         self.selected_widget_id = Some(id);
+    }
+
+    /// Places a ready-to-use [`WidgetPreset`] onto `target_cell` (from drag-and-drop) or the first free cell.
+    pub fn add_preset_at(&mut self, preset: WidgetPreset, target_cell: Option<(u16, u16)>) {
+        self.clear_alerts();
+        let mut candidate = self.deck.clone();
+        let Some(panel) = candidate.panels.get_mut(self.selected_panel_idx) else {
+            return;
+        };
+
+        let (raw_w, raw_h) = preset.default_spans();
+        let col_span = raw_w.min(panel.columns).max(1);
+        let row_span = raw_h.max(1);
+
+        let placement = target_cell
+            .and_then(|(c, r)| {
+                let clamped_c = c.min(panel.columns.saturating_sub(col_span));
+                is_region_free(panel, None, clamped_c, r, col_span, row_span)
+                    .then_some((clamped_c, r))
+            })
+            .or_else(|| find_free_cell(panel, col_span, row_span));
+
+        let Some((col, row)) = placement else {
+            self.error_message = Some("На панели нет свободного места для виджета.".to_owned());
+            return;
+        };
+
+        let existing_ids: Vec<&str> = panel.widgets.iter().map(|w| w.id.as_str()).collect();
+        let id = next_unique_safe_id("widget", preset.slug(), &existing_ids);
+        let spec = preset.build_spec(id.clone(), col, row, col_span, row_span);
+        panel.widgets.push(spec);
+
+        if let Err(msg) = self.commit_deck(
+            candidate,
+            Some(&format!("Добавлен виджет «{}».", preset.title())),
+        ) {
+            self.error_message = Some(msg);
+            return;
+        }
+        self.selected_widget_id = Some(id);
+    }
+
+    /// Moves `widget_id` directly to `(target_col, target_row)` (via mouse drag-and-drop),
+    /// automatically swapping positions if dropped onto another widget of identical size.
+    pub fn move_widget_to_cell(&mut self, widget_id: &str, target_col: u16, target_row: u16) {
+        self.clear_alerts();
+        let mut candidate = self.deck.clone();
+        let Some(panel) = candidate.panels.get_mut(self.selected_panel_idx) else {
+            return;
+        };
+        let Some(src_idx) = panel.widgets.iter().position(|w| w.id == widget_id) else {
+            return;
+        };
+
+        let src = panel.widgets[src_idx].clone();
+        let clamped_col = target_col.min(panel.columns.saturating_sub(src.col_span));
+        if clamped_col == src.col && target_row == src.row {
+            self.selected_widget_id = Some(widget_id.to_owned());
+            return;
+        }
+
+        if is_region_free(
+            panel,
+            Some(widget_id),
+            clamped_col,
+            target_row,
+            src.col_span,
+            src.row_span,
+        ) {
+            panel.widgets[src_idx].col = clamped_col;
+            panel.widgets[src_idx].row = target_row;
+            if let Err(msg) = self.commit_deck(candidate, None) {
+                self.error_message = Some(msg);
+                return;
+            }
+            self.selected_widget_id = Some(widget_id.to_owned());
+            return;
+        }
+
+        // Check if there is a single target widget occupying that cell that we can swap with
+        let probe = WidgetSpec {
+            col: clamped_col,
+            row: target_row,
+            ..src.clone()
+        };
+        let colliding: Vec<usize> = panel
+            .widgets
+            .iter()
+            .enumerate()
+            .filter(|(idx, w)| *idx != src_idx && probe.overlaps(w))
+            .map(|(idx, _)| idx)
+            .collect();
+
+        if colliding.len() == 1 {
+            let dst_idx = colliding[0];
+            let dst = panel.widgets[dst_idx].clone();
+            if dst.col_span == src.col_span && dst.row_span == src.row_span {
+                panel.widgets[src_idx].col = dst.col;
+                panel.widgets[src_idx].row = dst.row;
+                panel.widgets[dst_idx].col = src.col;
+                panel.widgets[dst_idx].row = src.row;
+                if self.commit_deck(candidate, None).is_ok() {
+                    self.selected_widget_id = Some(widget_id.to_owned());
+                }
+            }
+        }
+    }
+
+    /// Resizes `widget_id` directly to `(col_span, row_span)` when dragging its corner handle.
+    pub fn resize_widget_to_spans(&mut self, widget_id: &str, col_span: u16, row_span: u16) {
+        self.clear_alerts();
+        let mut candidate = self.deck.clone();
+        let Some(panel) = candidate.panels.get_mut(self.selected_panel_idx) else {
+            return;
+        };
+        let Some(slot) = panel.widgets.iter_mut().find(|w| w.id == widget_id) else {
+            return;
+        };
+        let max_w = panel.columns.saturating_sub(slot.col).max(1);
+        let next_w = col_span.clamp(1, max_w);
+        let next_h = row_span.clamp(1, 6);
+        if slot.col_span == next_w && slot.row_span == next_h {
+            return;
+        }
+        slot.col_span = next_w;
+        slot.row_span = next_h;
+        if let Err(msg) = self.commit_deck(candidate, None) {
+            self.error_message = Some(msg);
+            return;
+        }
+        self.selected_widget_id = Some(widget_id.to_owned());
+    }
+
+    /// Returns `true` if a widget (or new preset) can be dropped or swapped at `(col, row)`.
+    #[must_use]
+    pub fn can_drop_widget_at(
+        &self,
+        moving_widget_id: Option<&str>,
+        col: u16,
+        row: u16,
+        col_span: u16,
+        row_span: u16,
+    ) -> bool {
+        let Some(panel) = self.selected_panel() else {
+            return false;
+        };
+        if col_span == 0 || row_span == 0 || col.saturating_add(col_span) > panel.columns {
+            return false;
+        }
+        if is_region_free(panel, moving_widget_id, col, row, col_span, row_span) {
+            return true;
+        }
+        if let Some(moving_id) = moving_widget_id {
+            let probe = WidgetSpec {
+                id: "__probe__".to_owned(),
+                title: "probe".to_owned(),
+                kind: WidgetKind::Button,
+                col,
+                row,
+                col_span,
+                row_span,
+                telemetry: None,
+                action: WidgetAction::None,
+                text: None,
+                icon: None,
+                asset_key: None,
+                custom_component: None,
+                style: WidgetStyle::default(),
+            };
+            let colliding: Vec<&WidgetSpec> = panel
+                .widgets
+                .iter()
+                .filter(|w| w.id != moving_id && probe.overlaps(w))
+                .collect();
+            if colliding.len() == 1 {
+                let other = colliding[0];
+                return other.col_span == col_span && other.row_span == row_span;
+            }
+        }
+        false
     }
 
     /// Validates and saves edits to the currently selected widget.
@@ -1171,6 +1418,335 @@ impl DesktopManagerState {
     fn clear_alerts(&mut self) {
         self.status_message = None;
         self.error_message = None;
+    }
+}
+
+/// Ready-to-use consumer widget templates for 1-click and drag-and-drop placement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WidgetPreset {
+    /// CPU utilization percentage (`1×1`).
+    CpuUsage,
+    /// Real-time CPU sparkline chart (`2×2`).
+    CpuChart,
+    /// RAM utilization gauge (`2×1`).
+    RamUsage,
+    /// GPU utilization percentage (`1×1`).
+    GpuUsage,
+    /// Network download throughput (`1×1`).
+    NetworkSpeed,
+    /// Battery charge gauge (`1×1`).
+    BatteryLevel,
+    /// Media Play / Pause button (`1×1`).
+    MediaPlayPause,
+    /// Media Next Track button (`1×1`).
+    MediaNext,
+    /// Media Previous Track button (`1×1`).
+    MediaPrev,
+    /// System Volume Up button (`1×1`).
+    VolumeUp,
+    /// System Volume Down button (`1×1`).
+    VolumeDown,
+    /// System Mute toggle (`1×1`).
+    VolumeMute,
+    /// Text note (`2×1`).
+    QuickNote,
+}
+
+impl WidgetPreset {
+    /// Returns all ready-made presets in display order.
+    #[must_use]
+    pub const fn all() -> &'static [Self] {
+        &[
+            Self::CpuUsage,
+            Self::CpuChart,
+            Self::RamUsage,
+            Self::GpuUsage,
+            Self::NetworkSpeed,
+            Self::BatteryLevel,
+            Self::MediaPlayPause,
+            Self::MediaPrev,
+            Self::MediaNext,
+            Self::VolumeUp,
+            Self::VolumeDown,
+            Self::VolumeMute,
+            Self::QuickNote,
+        ]
+    }
+
+    /// Short Russian title displayed on the template card and created widget.
+    #[must_use]
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::CpuUsage => "Процессор %",
+            Self::CpuChart => "График CPU",
+            Self::RamUsage => "Память RAM",
+            Self::GpuUsage => "Видеокарта %",
+            Self::NetworkSpeed => "Скорость сети",
+            Self::BatteryLevel => "Заряд батареи",
+            Self::MediaPlayPause => "Старт / Пауза",
+            Self::MediaNext => "След. трек",
+            Self::MediaPrev => "Пред. трек",
+            Self::VolumeUp => "Громкость +",
+            Self::VolumeDown => "Громкость −",
+            Self::VolumeMute => "Без звука",
+            Self::QuickNote => "Заметка",
+        }
+    }
+
+    /// Subtitle describing the template's function.
+    #[must_use]
+    pub const fn subtitle(self) -> &'static str {
+        match self {
+            Self::CpuUsage => "Датчик нагрузки CPU (1×1)",
+            Self::CpuChart => "Живой график нагрузки (2×2)",
+            Self::RamUsage => "Шкала занятой памяти (2×1)",
+            Self::GpuUsage => "Нагрузка видеокарты (1×1)",
+            Self::NetworkSpeed => "Входящий трафик (1×1)",
+            Self::BatteryLevel => "Шкала заряда ноутбука (1×1)",
+            Self::MediaPlayPause => "Управление плеером (1×1)",
+            Self::MediaNext => "Переключить вперёд (1×1)",
+            Self::MediaPrev => "Переключить назад (1×1)",
+            Self::VolumeUp => "Прибавить звук ПК (1×1)",
+            Self::VolumeDown => "Убавить звук ПК (1×1)",
+            Self::VolumeMute => "Вкл / Выкл звук ПК (1×1)",
+            Self::QuickNote => "Произвольный текст (2×1)",
+        }
+    }
+
+    /// Default `(col_span, row_span)` for this preset.
+    #[must_use]
+    pub const fn default_spans(self) -> (u16, u16) {
+        match self {
+            Self::CpuChart => (2, 2),
+            Self::RamUsage | Self::QuickNote => (2, 1),
+            _ => (1, 1),
+        }
+    }
+
+    /// Curated vector icon associated with this preset.
+    #[must_use]
+    pub const fn icon(self) -> WidgetIcon {
+        match self {
+            Self::CpuUsage | Self::CpuChart => WidgetIcon::Cpu,
+            Self::RamUsage => WidgetIcon::Memory,
+            Self::GpuUsage => WidgetIcon::Gpu,
+            Self::NetworkSpeed => WidgetIcon::Network,
+            Self::BatteryLevel => WidgetIcon::Battery,
+            Self::MediaPlayPause => WidgetIcon::PlayPause,
+            Self::MediaNext => WidgetIcon::NextTrack,
+            Self::MediaPrev => WidgetIcon::PreviousTrack,
+            Self::VolumeUp => WidgetIcon::VolumeUp,
+            Self::VolumeDown => WidgetIcon::VolumeDown,
+            Self::VolumeMute => WidgetIcon::VolumeMute,
+            Self::QuickNote => WidgetIcon::Terminal,
+        }
+    }
+
+    const fn slug(self) -> &'static str {
+        match self {
+            Self::CpuUsage => "cpu",
+            Self::CpuChart => "cpu-chart",
+            Self::RamUsage => "ram",
+            Self::GpuUsage => "gpu",
+            Self::NetworkSpeed => "net",
+            Self::BatteryLevel => "battery",
+            Self::MediaPlayPause => "play",
+            Self::MediaNext => "next",
+            Self::MediaPrev => "prev",
+            Self::VolumeUp => "vol-up",
+            Self::VolumeDown => "vol-down",
+            Self::VolumeMute => "mute",
+            Self::QuickNote => "note",
+        }
+    }
+
+    fn build_spec(
+        self,
+        id: String,
+        col: u16,
+        row: u16,
+        col_span: u16,
+        row_span: u16,
+    ) -> WidgetSpec {
+        let (kind, telemetry, action, text, bg_hex, accent_hex) = match self {
+            Self::CpuUsage => (
+                WidgetKind::MetricNumber,
+                Some(TelemetryBinding::CpuUsagePct),
+                WidgetAction::None,
+                None,
+                "#162238",
+                "#38BDF8",
+            ),
+            Self::CpuChart => (
+                WidgetKind::Chart,
+                Some(TelemetryBinding::CpuUsagePct),
+                WidgetAction::None,
+                None,
+                "#131E32",
+                "#3B82F6",
+            ),
+            Self::RamUsage => (
+                WidgetKind::Gauge,
+                Some(TelemetryBinding::RamUsagePct),
+                WidgetAction::None,
+                None,
+                "#112A26",
+                "#10B981",
+            ),
+            Self::GpuUsage => (
+                WidgetKind::MetricNumber,
+                Some(TelemetryBinding::GpuUsagePct),
+                WidgetAction::None,
+                None,
+                "#251838",
+                "#A855F7",
+            ),
+            Self::NetworkSpeed => (
+                WidgetKind::MetricNumber,
+                Some(TelemetryBinding::NetworkRxBps),
+                WidgetAction::None,
+                None,
+                "#162436",
+                "#06B6D4",
+            ),
+            Self::BatteryLevel => (
+                WidgetKind::Gauge,
+                Some(TelemetryBinding::BatteryPct),
+                WidgetAction::None,
+                None,
+                "#14291E",
+                "#22C55E",
+            ),
+            Self::MediaPlayPause => (
+                WidgetKind::Button,
+                None,
+                WidgetAction::Control(ControlAction::MediaPlayPause),
+                None,
+                "#1D2D50",
+                "#60A5FA",
+            ),
+            Self::MediaNext => (
+                WidgetKind::Button,
+                None,
+                WidgetAction::Control(ControlAction::MediaNextTrack),
+                None,
+                "#1B2538",
+                "#93C5FD",
+            ),
+            Self::MediaPrev => (
+                WidgetKind::Button,
+                None,
+                WidgetAction::Control(ControlAction::MediaPreviousTrack),
+                None,
+                "#1B2538",
+                "#93C5FD",
+            ),
+            Self::VolumeUp => (
+                WidgetKind::Button,
+                None,
+                WidgetAction::Control(ControlAction::VolumeUp),
+                None,
+                "#132A2E",
+                "#2DD4BF",
+            ),
+            Self::VolumeDown => (
+                WidgetKind::Button,
+                None,
+                WidgetAction::Control(ControlAction::VolumeDown),
+                None,
+                "#132A2E",
+                "#2DD4BF",
+            ),
+            Self::VolumeMute => (
+                WidgetKind::Toggle,
+                None,
+                WidgetAction::Control(ControlAction::VolumeMuteToggle),
+                None,
+                "#311820",
+                "#F87171",
+            ),
+            Self::QuickNote => (
+                WidgetKind::Text,
+                None,
+                WidgetAction::None,
+                Some("Быстрая заметка на экране телефона".to_owned()),
+                "#1E2636",
+                "#94A3B8",
+            ),
+        };
+
+        WidgetSpec {
+            id,
+            title: self.title().to_owned(),
+            kind,
+            col,
+            row,
+            col_span,
+            row_span,
+            telemetry,
+            action,
+            text,
+            icon: Some(self.icon()),
+            asset_key: None,
+            custom_component: None,
+            style: WidgetStyle {
+                background_hex: bg_hex.to_owned(),
+                foreground_hex: "#F8FAFC".to_owned(),
+                accent_hex: accent_hex.to_owned(),
+                font_size_sp: 14,
+                corner_radius: 14,
+            },
+        }
+    }
+}
+
+fn is_region_free(
+    panel: &PanelConfig,
+    ignore_widget_id: Option<&str>,
+    col: u16,
+    row: u16,
+    col_span: u16,
+    row_span: u16,
+) -> bool {
+    if col_span == 0 || row_span == 0 || col.saturating_add(col_span) > panel.columns {
+        return false;
+    }
+    let probe = WidgetSpec {
+        id: "__probe__".to_owned(),
+        title: "probe".to_owned(),
+        kind: WidgetKind::Text,
+        col,
+        row,
+        col_span,
+        row_span,
+        telemetry: None,
+        action: WidgetAction::None,
+        text: None,
+        icon: None,
+        asset_key: None,
+        custom_component: None,
+        style: WidgetStyle::default(),
+    };
+    panel.widgets.iter().all(|existing| {
+        if ignore_widget_id.is_some_and(|ignore| existing.id == ignore) {
+            true
+        } else {
+            !probe.overlaps(existing)
+        }
+    })
+}
+
+/// Detects the primary local LAN IPv4 address via routing table lookup without sending traffic.
+#[must_use]
+pub fn detect_lan_ipv4() -> Option<String> {
+    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect("192.0.2.1:80").ok()?;
+    let addr = sock.local_addr().ok()?;
+    let ip = addr.ip();
+    if ip.is_loopback() || ip.is_unspecified() {
+        None
+    } else {
+        Some(ip.to_string())
     }
 }
 
@@ -1445,6 +2021,7 @@ fn next_unique_safe_id(fallback_prefix: &str, raw_hint: &str, existing: &[&str])
     format!("{fallback_prefix}-{}", existing.len() + 1)
 }
 
+#[allow(dead_code)]
 const fn widget_kind_slug(kind: WidgetKind) -> &'static str {
     match kind {
         WidgetKind::Text => "text",
@@ -1459,6 +2036,7 @@ const fn widget_kind_slug(kind: WidgetKind) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn default_spans_for_kind(kind: WidgetKind, panel_columns: u16) -> (u16, u16) {
     let (col_span, row_span) = match kind {
         WidgetKind::Chart | WidgetKind::Text => (2, 2),
@@ -1469,6 +2047,7 @@ fn default_spans_for_kind(kind: WidgetKind, panel_columns: u16) -> (u16, u16) {
     (col_span.min(panel_columns.max(1)), row_span)
 }
 
+#[allow(dead_code)]
 fn default_widget_spec(
     id: String,
     kind: WidgetKind,
