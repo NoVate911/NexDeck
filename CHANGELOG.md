@@ -5,6 +5,8 @@
 ## [Unreleased]
 
 ### Добавлено
+- Визуализация телеметрии в реальном времени (`TelemetryLineChart` на `CustomPainter` для CPU, RAM и сети TX/RX, раскрываемая детализация по ядрам CPU, GPU VRAM и трафик интерфейсов) и панель управления мультимедиа/громкостью в `apps/mobile`.
+- Строгий белый список команд удалённого управления `ControlAction` / `ControlCommandRequest` / `ControlCommandResponse` в `crates/transport`, маршрутизация `MessageKind::ControlCommand` и нативный Windows-исполнитель `WindowsMediaExecutor` (`SendInput`: `VK_VOLUME_*`, `VK_MEDIA_*`) в `crates/core`.
 - Инициализирован Flutter-клиент `nexdeck_mobile` (`apps/mobile`): модели протокола и телеметрии (`Envelope`, `PairingQrPayload`, `SystemSnapshot`), HTTP/WSS-транспорт с SHA-256 TLS-пиннингом сертификата (`SecurityContext(withTrustedRoots: false)` + constant-time сравнение), хранилище сессии, контроллер автопереподключения, экраны сопряжения/мониторинга и проверки Flutter (`Mobile Client (Flutter)`) в GitHub Actions CI.
 - Полноценный runtime `Core Agent` (`nexdeck-agent`) в `crates/core`: асинхронный цикл `tokio` (`current_thread`), рассылка телеметрии по WSS, постоянное хранилище конфигурации/устройств/TLS (`StoragePaths`), автозапуск Windows через `HKCU\...\Run`, замер памяти процесса (`process_metrics`) и CLI (`--daemon`, `--pair`, `--install-autostart`, `--uninstall-autostart`, `--autostart-status`, `--measure-ram`, `--check-config`).
 - JSON-сериализация снимков `SystemSnapshot` и метрик (`serde`) в `crates/monitoring`.
