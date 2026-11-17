@@ -17,3 +17,17 @@ jobs:
         with:
           fail-on-severity: moderate
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          # GitHub Dependency Graph возвращает лицензии pub в нижнем регистре (apache-2.0, bsd-3-clause, mit),
+          # из-за чего spdx-expression-parse считает их unresolved; перечисляем только проверенные Dart/Flutter пакеты:
+          allow-dependencies-licenses: >-
+            pkg:pub/clock,
+            pkg:pub/crypto,
+            pkg:pub/cupertino_icons,
+            pkg:pub/cupertino_ui,
+            pkg:pub/listen,
+            pkg:pub/material_color_utilities,
+            pkg:pub/material_ui,
+            pkg:pub/stack_trace,
+            pkg:pub/test_api,
+            pkg:pub/vector_math,
+            pkg:pub/vm_service
