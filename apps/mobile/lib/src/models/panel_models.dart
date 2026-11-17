@@ -310,6 +310,23 @@ class WidgetStyle {
     'font_size_sp': fontSizeSp,
     'corner_radius': cornerRadius,
   };
+
+  /// Returns a copy with overridden visual properties.
+  WidgetStyle copyWith({
+    String? backgroundHex,
+    String? foregroundHex,
+    String? accentHex,
+    int? fontSizeSp,
+    int? cornerRadius,
+  }) {
+    return WidgetStyle(
+      backgroundHex: backgroundHex ?? this.backgroundHex,
+      foregroundHex: foregroundHex ?? this.foregroundHex,
+      accentHex: accentHex ?? this.accentHex,
+      fontSizeSp: fontSizeSp ?? this.fontSizeSp,
+      cornerRadius: cornerRadius ?? this.cornerRadius,
+    );
+  }
 }
 
 /// Positioned and styled widget on a [PanelConfig] grid.
@@ -461,6 +478,48 @@ class WidgetSpec {
     if (customComponent != null) 'custom_component': customComponent,
     'style': style.toJson(),
   };
+
+  /// Returns a copy with specified fields updated.
+  WidgetSpec copyWith({
+    String? id,
+    String? title,
+    WidgetKind? kind,
+    int? col,
+    int? row,
+    int? colSpan,
+    int? rowSpan,
+    TelemetryBinding? telemetry,
+    bool clearTelemetry = false,
+    WidgetAction? action,
+    String? text,
+    bool clearText = false,
+    WidgetIcon? icon,
+    bool clearIcon = false,
+    String? assetKey,
+    bool clearAssetKey = false,
+    String? customComponent,
+    bool clearCustomComponent = false,
+    WidgetStyle? style,
+  }) {
+    return WidgetSpec(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      kind: kind ?? this.kind,
+      col: col ?? this.col,
+      row: row ?? this.row,
+      colSpan: colSpan ?? this.colSpan,
+      rowSpan: rowSpan ?? this.rowSpan,
+      telemetry: clearTelemetry ? null : (telemetry ?? this.telemetry),
+      action: action ?? this.action,
+      text: clearText ? null : (text ?? this.text),
+      icon: clearIcon ? null : (icon ?? this.icon),
+      assetKey: clearAssetKey ? null : (assetKey ?? this.assetKey),
+      customComponent: clearCustomComponent
+          ? null
+          : (customComponent ?? this.customComponent),
+      style: style ?? this.style,
+    );
+  }
 }
 
 /// Complete dashboard panel layout matching Rust `PanelConfig`.
@@ -558,6 +617,23 @@ class PanelConfig {
     'refresh_interval_ms': refreshIntervalMs,
     'widgets': [for (final w in widgets) w.toJson()],
   };
+
+  /// Returns a copy with overridden panel fields.
+  PanelConfig copyWith({
+    String? id,
+    String? name,
+    int? columns,
+    int? refreshIntervalMs,
+    List<WidgetSpec>? widgets,
+  }) {
+    return PanelConfig(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      columns: columns ?? this.columns,
+      refreshIntervalMs: refreshIntervalMs ?? this.refreshIntervalMs,
+      widgets: widgets ?? this.widgets,
+    );
+  }
 }
 
 /// Multi-panel workspace configuration matching Rust `DeckConfig`.
@@ -705,6 +781,19 @@ class DeckConfig {
     'active_panel_id': activePanelId,
     'panels': [for (final p in panels) p.toJson()],
   };
+
+  /// Returns a copy with updated deck fields.
+  DeckConfig copyWith({
+    int? schemaVersion,
+    String? activePanelId,
+    List<PanelConfig>? panels,
+  }) {
+    return DeckConfig(
+      schemaVersion: schemaVersion ?? this.schemaVersion,
+      activePanelId: activePanelId ?? this.activePanelId,
+      panels: panels ?? this.panels,
+    );
+  }
 }
 
 void _validateSafeId(String field, String value) {

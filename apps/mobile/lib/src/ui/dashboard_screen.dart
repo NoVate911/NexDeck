@@ -3,100 +3,148 @@ import 'package:material_ui/material_ui.dart';
 import '../models/monitoring_models.dart';
 import '../models/protocol_models.dart';
 import '../state/agent_controller.dart';
+import '../state/deck_controller.dart';
 import '../storage/session_store.dart';
 import '../transport/transport_client.dart';
+import 'deck_panel_view.dart';
 import 'formatters.dart';
 import 'telemetry_chart.dart';
 
-/// Connected host telemetry and remote media control screen for Stage 2.
-class DashboardScreen extends StatelessWidget {
+/// Connected host telemetry, remote media control, and dynamic widget engine dashboard.
+class DashboardScreen extends StatefulWidget {
   /// Creates a [DashboardScreen].
-  const DashboardScreen({required this.controller, super.key});
+  const DashboardScreen({
+    required this.controller,
+    required this.deckController,
+    super.key,
+  });
 
   /// Controller supplying active [HostSession], transport status, metrics, and control actions.
   final AgentController controller;
 
+  /// Controller managing customizable panels and widgets (`Stage 3`).
+  final DeckController deckController;
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  int _selectedTabIndex = 0;
+
   @override
   Widget build(BuildContext context) {
-    final session = controller.session;
+    final session = widget.controller.session;
     if (session == null) {
       return const SizedBox.shrink();
     }
 
-    final snapshot = controller.latestSnapshot;
-    final state = controller.connectionState;
+    final snapshot = widget.controller.latestSnapshot;
+    final state = widget.controller.connectionState;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('NexDeck — Мониторинг ПК'),
+        title: Text(
+          _selectedTabIndex == 0
+              ? 'NexDeck — Мониторинг ПК'
+              : 'NexDeck — Панели виджетов',
+        ),
         actions: [
           IconButton(
             key: const Key('heartbeat_button'),
             tooltip: 'Отправить Heartbeat',
             onPressed: state == TransportConnectionState.connected
-                ? () => controller.sendHeartbeat()
+                ? () => widget.controller.sendHeartbeat()
                 : null,
             icon: const Icon(Icons.monitor_heart_outlined),
           ),
           IconButton(
             key: const Key('unpair_button'),
             tooltip: 'Отвязать хост',
-            onPressed: controller.unpairHost,
+            onPressed: widget.controller.unpairHost,
             icon: const Icon(Icons.link_off),
           ),
         ],
       ),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _ConnectionBanner(session: session, controller: controller),
-            const SizedBox(height: 12),
-            _MediaControlsCard(controller: controller),
-            const SizedBox(height: 12),
-            if (snapshot == null)
-              const Card(
-                child: Padding(
-                  padding: EdgeInsets.all(20),
-                  child: Text(
-                    'Ожидание первого снимка телеметрии от nexdeck-agent…',
+        child: _selectedTabIndex == 0
+            ? ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  _ConnectionBanner(
+                    session: session,
+                    controller: widget.controller,
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  _MediaControlsCard(controller: widget.controller),
+                  const SizedBox(height: 12),
+                  if (snapshot == null)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(20),
+                        child: Text(
+                          'Ожидание первого снимка телеметрии от nexdeck-agent…',
+                        ),
+                      ),
+                    )
+                  else ...[
+                    _CpuCard(
+                      cpu: snapshot.cpu,
+                      uptimeSecs: snapshot.uptimeSecs,
+                      history: widget.controller.cpuHistory,
+                    ),
+                    const SizedBox(height: 12),
+                    _MemoryCard(
+                      memory: snapshot.memory,
+                      history: widget.controller.ramHistory,
+                    ),
+                    if (snapshot.gpus.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      _GpuSection(gpus: snapshot.gpus),
+                    ],
+                    if (snapshot.disks.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      _DiskSection(disks: snapshot.disks),
+                    ],
+                    if (snapshot.networks.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      _NetworkSection(
+                        networks: snapshot.networks,
+                        rxHistoryKib: widget.controller.networkRxKibHistory,
+                        txHistoryKib: widget.controller.networkTxKibHistory,
+                      ),
+                    ],
+                    if (snapshot.battery != null) ...[
+                      const SizedBox(height: 12),
+                      _BatteryCard(battery: snapshot.battery!),
+                    ],
+                  ],
+                ],
               )
-            else ...[
-              _CpuCard(
-                cpu: snapshot.cpu,
-                uptimeSecs: snapshot.uptimeSecs,
-                history: controller.cpuHistory,
+            : DeckPanelView(
+                agentController: widget.controller,
+                deckController: widget.deckController,
               ),
-              const SizedBox(height: 12),
-              _MemoryCard(
-                memory: snapshot.memory,
-                history: controller.ramHistory,
-              ),
-              if (snapshot.gpus.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _GpuSection(gpus: snapshot.gpus),
-              ],
-              if (snapshot.disks.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _DiskSection(disks: snapshot.disks),
-              ],
-              if (snapshot.networks.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _NetworkSection(
-                  networks: snapshot.networks,
-                  rxHistoryKib: controller.networkRxKibHistory,
-                  txHistoryKib: controller.networkTxKibHistory,
-                ),
-              ],
-              if (snapshot.battery != null) ...[
-                const SizedBox(height: 12),
-                _BatteryCard(battery: snapshot.battery!),
-              ],
-            ],
-          ],
-        ),
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedTabIndex,
+        onDestinationSelected: (index) {
+          setState(() => _selectedTabIndex = index);
+        },
+        destinations: const [
+          NavigationDestination(
+            key: Key('nav_monitoring_tab'),
+            icon: Icon(Icons.speed_outlined),
+            selectedIcon: Icon(Icons.speed),
+            label: 'Мониторинг',
+          ),
+          NavigationDestination(
+            key: Key('nav_panels_tab'),
+            icon: Icon(Icons.grid_view_outlined),
+            selectedIcon: Icon(Icons.grid_view_rounded),
+            label: 'Панели',
+          ),
+        ],
       ),
     );
   }
