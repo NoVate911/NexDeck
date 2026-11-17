@@ -5,6 +5,7 @@
 //! [`nexdeck_plugin_engine`] with zero heavy UI dependencies.
 
 pub mod autostart;
+pub mod control;
 pub mod process_metrics;
 pub mod runtime;
 pub mod storage;
