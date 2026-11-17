@@ -6,10 +6,10 @@
 
 ## Текущее состояние
 
-- **Актуальный этап:** Этап 3 (Widget Engine и Desktop Manager) — **выполнен PR 3.2 (Desktop Manager `apps/desktop` на чистом Rust `egui / eframe`)**.
+- **Актуальный этап:** Этап 3 (Widget Engine и Desktop Manager) **завершён** — выполнен **PR 3.3 (`apps/mobile` динамический Widget Engine и редактор панелей, Issue #26)**; следующим начинается **Этап 4 (Universal API)**.
 - **Версия workspace:** `0.1.0` (Rust Edition 2024, `rust-version = "1.88"`; Flutter `3.50.0` / Dart `3.14.0` в `apps/mobile`).
-- **Последний выполненный шаг:** реализован чистый Rust GUI-конфигуратор `nexdeck-desktop` (`apps/desktop/src/main.rs`, `state.rs`, `ui.rs` на `eframe 0.33.3` / `glow`): конструктор сетки панелей и виджетов (`panels.json`) с контролем коллизий и импортом/экспортом JSON, редактор `config.json`, автозапуск `nexdeck-agent` в `HKCU\...\Run`, запуск/остановка локального процесса агента (обычный и `--pair` с показом PIN/QR), отзыв устройств (`devices.json`), просмотр/перевыпуск TLS SHA-256 отпечатка и обновление `deny.toml` под зависимости `eframe`.
-- **Фактические показатели `nexdeck-agent.exe` (release, LTO + strip):** размер `1 743 872` байт (`~1.66 MiB`); `--measure-ram` — `private=1.23 MiB`, `working_set=6.44 MiB`.
+- **Последний выполненный шаг:** реализован динамический Widget Engine в `apps/mobile` (`DeckStore`/`FileDeckStore` для `panels.json`, `DeckController` с троттлингом `refreshIntervalMs`, проверкой коллизий и JSON-импортом/экспортом, а также `DeckPanelView` / `DeckWidgetCard` / `widget_editor_sheet.dart` во второй вкладке `DashboardScreen` для всех 9 типов виджетов); Этап 3 вынесен в архив [`stage-3.md`](docs/journal/archive/stage-3.md).
+- **Фактические показатели `nexdeck-agent.exe` (release, LTO + strip):** размер `1 743 360` байт (`~1.66 MiB`); `--measure-ram` — `private=1.23 MiB`, `working_set=6.44 MiB`. `nexdeck-desktop.exe` — `3 614 720` байт.
 - **Согласованные решения:**
   - Сеть и сервер: `tokio` (`current_thread`) + `axum` + `rustls` WSS с пиннингом SHA-256 отпечатка и PIN/QR-pairing ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)).
   - Мониторинг Windows 11: Win32/PDH поверх `windows-sys` (`crates/monitoring`, [ADR-0006](docs/architecture/adr/0006-monitoring-win32-pdh.md)).
@@ -17,10 +17,10 @@
 
 ---
 
-## Что делать следующим (Этап 3 — Widget Engine и Desktop Manager)
+## Что делать следующим (Этап 4 — Universal API)
 
-1. **PR 3.3 (`apps/mobile` Widget Engine):** динамический рендерер настраиваемых панелей и виджетов (текст, числа, кнопки действий, переключатели, графики, индикаторы, иконки) на базе `DeckConfig` / `PanelConfig` с локальным сохранением и импортом/экспортом JSON.
-2. **Этап 4 (Уведомления и команды подтверждения):** интеграция `crates/notifications` (пересылка toast-уведомлений в фоне и буферизация при сне) и `crates/approval` (одноразовые запросы подтверждения с проверкой границ безопасности и без обхода UAC).
+1. **Этап 4 (`crates/api`, `crates/core`, `sdk/`, `examples/`):** реализовать локальный IPC / авторизованный локальный HTTP/WebSocket API на `127.0.0.1` (`axum`), регистрацию сторонних приложений, выдачу и отзыв токенов с ограниченными правами (`ClientPolicy` / scopes), клиентские SDK и синтетические примеры (`ExampleApp`, `org.example.*`).
+2. **Этап 5 (`crates/notifications`, `crates/approval`):** сквозной центр уведомлений с буфером сна и поток Remote Approval (`approval_request` от стороннего приложения -> экран телефона -> возврат решения без обхода UAC).
 
 ---
 
@@ -52,3 +52,4 @@
 - [Этап 0 — Инициализация репозитория и базовой инфраструктуры](docs/journal/archive/stage-0.md)
 - [Этап 1 — Core Agent (мониторинг, WSS-сервер, pairing, runtime и автозапуск)](docs/journal/archive/stage-1.md)
 - [Этап 2 — Mobile Client (Flutter-клиент, TLS-пиннинг, графики телеметрии и мультимедиа-управление)](docs/journal/archive/stage-2.md)
+- [Этап 3 — Widget Engine и Desktop Manager (`crates/api`, `apps/desktop`, `apps/mobile`)](docs/journal/archive/stage-3.md)
