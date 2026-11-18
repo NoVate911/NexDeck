@@ -58,6 +58,15 @@ pub struct ApprovalRequest {
     pub status: ApprovalStatus,
 }
 
+/// Wire decision payload sent by an authenticated mobile client over WSS (`MessageKind::Approval`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalDecisionMessage {
+    /// Target single-use approval request identifier.
+    pub request_id: String,
+    /// Chosen action string from [`ApprovalRequest::allowed_actions`].
+    pub action: String,
+}
+
 /// Errors produced when registering or resolving remote approvals.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApprovalError {
@@ -101,6 +110,18 @@ impl ApprovalRegistry {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Reconstructs an [`ApprovalRegistry`] from persisted or pre-seeded records.
+    #[must_use]
+    pub fn from_records(records: impl IntoIterator<Item = ApprovalRequest>) -> Self {
+        let mut requests = HashMap::new();
+        for req in records {
+            if !req.request_id.trim().is_empty() {
+                requests.insert(req.request_id.clone(), req);
+            }
+        }
+        Self { requests }
     }
 
     /// Registers a new [`ApprovalRequest`] after validating invariants and ID uniqueness.
@@ -202,6 +223,38 @@ impl ApprovalRegistry {
         items.sort_by(|left, right| left.request_id.cmp(&right.request_id));
         items
     }
+
+    /// Transitions all timed-out [`ApprovalStatus::Pending`] requests to [`ApprovalStatus::Expired`],
+    /// returning the newly expired entries ordered by `request_id`.
+    pub fn expire_stale(&mut self, now_epoch_ms: u64) -> Vec<ApprovalRequest> {
+        let mut expired = Vec::new();
+        for req in self.requests.values_mut() {
+            if req.status == ApprovalStatus::Pending && now_epoch_ms > req.expires_at_epoch_ms {
+                req.status = ApprovalStatus::Expired;
+                expired.push(req.clone());
+            }
+        }
+        expired.sort_by(|left, right| left.request_id.cmp(&right.request_id));
+        expired
+    }
+
+    /// Sweeps expired requests and returns active [`ApprovalStatus::Pending`] requests ordered by
+    /// expiration timestamp then `request_id`.
+    pub fn pending_active(&mut self, now_epoch_ms: u64) -> Vec<ApprovalRequest> {
+        let _ = self.expire_stale(now_epoch_ms);
+        let mut pending: Vec<ApprovalRequest> = self
+            .requests
+            .values()
+            .filter(|req| req.status == ApprovalStatus::Pending)
+            .cloned()
+            .collect();
+        pending.sort_by(|left, right| {
+            left.expires_at_epoch_ms
+                .cmp(&right.expires_at_epoch_ms)
+                .then_with(|| left.request_id.cmp(&right.request_id))
+        });
+        pending
+    }
 }
 
 #[cfg(test)]
@@ -271,5 +324,26 @@ mod tests {
             reg.resolve(&act_id, "escalate", 2_000),
             Err(ApprovalError::DisallowedAction("escalate".to_owned()))
         );
+    }
+
+    #[test]
+    fn sweeps_expired_requests_and_lists_pending_active() {
+        let mut reg = ApprovalRegistry::new();
+        let id_old = test_id(10);
+        let id_live = test_id(11);
+        assert_eq!(reg.register(sample_request(id_old.clone(), 1_000)), Ok(()));
+        assert_eq!(reg.register(sample_request(id_live.clone(), 5_000)), Ok(()));
+
+        let expired = reg.expire_stale(1_500);
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].request_id, id_old);
+        assert_eq!(expired[0].status, ApprovalStatus::Expired);
+
+        let pending = reg.pending_active(1_500);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].request_id, id_live);
+
+        // Subsequent sweep is a no-op until id_live expires.
+        assert!(reg.expire_stale(1_500).is_empty());
     }
 }

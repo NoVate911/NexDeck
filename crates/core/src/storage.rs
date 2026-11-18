@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use nexdeck_api::clients::ClientRecord;
 use nexdeck_api::panels::DeckConfig;
+use nexdeck_notifications::NotificationEvent;
 use nexdeck_transport::TransportError;
 use nexdeck_transport::pairing::DeviceRecord;
 use nexdeck_transport::tls::HostTlsIdentity;
@@ -20,6 +21,7 @@ const DATA_DIR_NAME: &str = "NexDeck";
 const CONFIG_FILE_NAME: &str = "config.json";
 const DEVICES_FILE_NAME: &str = "devices.json";
 const CLIENTS_FILE_NAME: &str = "clients.json";
+const NOTIFICATIONS_FILE_NAME: &str = "notifications.json";
 const PANELS_FILE_NAME: &str = "panels.json";
 const TLS_CERT_FILE_NAME: &str = "host-cert.pem";
 const TLS_KEY_FILE_NAME: &str = "host-key.pem";
@@ -121,6 +123,12 @@ impl StoragePaths {
     #[must_use]
     pub fn clients_path(&self) -> PathBuf {
         self.root_dir.join(CLIENTS_FILE_NAME)
+    }
+
+    /// Returns the path to `notifications.json`.
+    #[must_use]
+    pub fn notifications_path(&self) -> PathBuf {
+        self.root_dir.join(NOTIFICATIONS_FILE_NAME)
     }
 
     /// Returns the path to `panels.json`.
@@ -231,6 +239,33 @@ impl StoragePaths {
         sorted.sort_by(|left, right| left.client_id.cmp(&right.client_id));
         let json = serde_json::to_vec_pretty(&sorted)?;
         write_atomic(&self.clients_path(), &json, true)
+    }
+
+    /// Loads buffered [`NotificationEvent`] records from `notifications.json` (empty if absent).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if reading or JSON decoding fails.
+    pub fn load_notifications(&self) -> Result<Vec<NotificationEvent>, StorageError> {
+        let path = self.notifications_path();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let raw = fs::read_to_string(&path)?;
+        let mut events: Vec<NotificationEvent> = serde_json::from_str(&raw)?;
+        events.sort_by_key(|event| event.id);
+        Ok(events)
+    }
+
+    /// Atomically persists buffered [`NotificationEvent`] records (sleep/disconnect buffer)
+    /// to `notifications.json`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if serialization or atomic file replacement fails.
+    pub fn save_notifications(&self, events: &[NotificationEvent]) -> Result<(), StorageError> {
+        let json = serde_json::to_vec_pretty(events)?;
+        write_atomic(&self.notifications_path(), &json, true)
     }
 
     /// Loads `panels.json` or initializes it with [`DeckConfig::default_starter`] if absent.
@@ -512,6 +547,38 @@ mod tests {
             .load_or_init_panels()
             .expect("modified panels should reload");
         assert_eq!(reloaded.panels[0].refresh_interval_ms, 500);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn persists_and_reloads_notifications_sleep_buffer() {
+        use nexdeck_notifications::{NotificationPriority, NotificationSource};
+
+        let dir = temp_storage_dir("notifications");
+        let paths = StoragePaths::new(dir.clone());
+        assert!(
+            paths
+                .load_notifications()
+                .expect("absent file yields empty list")
+                .is_empty()
+        );
+
+        let sample = vec![NotificationEvent {
+            id: 42,
+            source: NotificationSource::Application("ExampleApp".to_owned()),
+            title: "Task finished".to_owned(),
+            body: "Synthetic build succeeded".to_owned(),
+            priority: NotificationPriority::High,
+            created_at_epoch_ms: 1_700_000_000_042,
+        }];
+        paths
+            .save_notifications(&sample)
+            .expect("save notifications.json");
+        let reloaded = paths
+            .load_notifications()
+            .expect("reload notifications.json");
+        assert_eq!(reloaded, sample);
 
         let _ = fs::remove_dir_all(&dir);
     }

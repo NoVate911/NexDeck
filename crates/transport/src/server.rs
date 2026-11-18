@@ -7,6 +7,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::Router;
@@ -18,7 +19,7 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum_server::Handle;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, broadcast, mpsc};
+use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 
 use crate::pairing::{DeviceRegistry, PairingError};
 use crate::tls::HostTlsIdentity;
@@ -57,6 +58,9 @@ pub struct InboundFrame {
     pub envelope: Envelope,
 }
 
+/// Channel used to request initial sync envelopes (sleep buffer, pending approvals) on WebSocket connect.
+pub type BacklogRequestTx = mpsc::Sender<oneshot::Sender<Vec<Envelope>>>;
+
 /// Shared state injected into the Axum router handlers.
 #[derive(Clone)]
 pub struct ServerState {
@@ -64,6 +68,8 @@ pub struct ServerState {
     fingerprint_sha256: String,
     broadcast_tx: broadcast::Sender<String>,
     inbound_tx: mpsc::Sender<InboundFrame>,
+    active_ws_clients: Arc<AtomicUsize>,
+    backlog_tx: Option<BacklogRequestTx>,
 }
 
 impl ServerState {
@@ -81,13 +87,28 @@ impl ServerState {
             fingerprint_sha256,
             broadcast_tx,
             inbound_tx,
+            active_ws_clients: Arc::new(AtomicUsize::new(0)),
+            backlog_tx: None,
         }
+    }
+
+    /// Attaches a backlog provider channel queried immediately after `/ws` authentication.
+    #[must_use]
+    pub fn with_backlog(mut self, backlog_tx: Option<BacklogRequestTx>) -> Self {
+        self.backlog_tx = backlog_tx;
+        self
     }
 
     /// Returns the host TLS certificate SHA-256 fingerprint.
     #[must_use]
     pub fn fingerprint_sha256(&self) -> &str {
         &self.fingerprint_sha256
+    }
+
+    /// Returns the count of currently connected WebSocket peers on `/ws`.
+    #[must_use]
+    pub fn connected_clients(&self) -> usize {
+        self.active_ws_clients.load(Ordering::Relaxed)
     }
 }
 
@@ -105,6 +126,7 @@ pub struct WssServerHandle {
     local_addr: SocketAddr,
     fingerprint_sha256: String,
     broadcast_tx: broadcast::Sender<String>,
+    active_ws_clients: Arc<AtomicUsize>,
     handle: Handle<SocketAddr>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -120,6 +142,12 @@ impl WssServerHandle {
     #[must_use]
     pub fn fingerprint_sha256(&self) -> &str {
         &self.fingerprint_sha256
+    }
+
+    /// Returns the number of currently connected authenticated `/ws` mobile clients.
+    #[must_use]
+    pub fn connected_clients(&self) -> usize {
+        self.active_ws_clients.load(Ordering::Relaxed)
     }
 
     /// Serializes, validates, and broadcasts an [`Envelope`] to all connected WebSocket peers.
@@ -180,9 +208,28 @@ pub async fn spawn_wss_server_with_routes(
     inbound_tx: mpsc::Sender<InboundFrame>,
     extra_routes: Option<Router>,
 ) -> Result<WssServerHandle, TransportError> {
+    spawn_wss_server_with_backlog(bind_addr, tls, registry, inbound_tx, extra_routes, None).await
+}
+
+/// Binds and spawns the TLS-secured Axum server on `bind_addr` with optional `extra_routes`
+/// and a `backlog_tx` hook supplying initial envelopes (sleep buffer, pending approvals) on `/ws` connect.
+///
+/// # Errors
+///
+/// Returns [`TransportError::ChannelFailure`] if TLS configuration or socket binding fails.
+pub async fn spawn_wss_server_with_backlog(
+    bind_addr: SocketAddr,
+    tls: &HostTlsIdentity,
+    registry: Arc<RwLock<DeviceRegistry>>,
+    inbound_tx: mpsc::Sender<InboundFrame>,
+    extra_routes: Option<Router>,
+    backlog_tx: Option<BacklogRequestTx>,
+) -> Result<WssServerHandle, TransportError> {
     let rustls_config = tls.to_rustls_config().await?;
-    let state = ServerState::new(registry, tls.fingerprint_sha256.clone(), inbound_tx);
+    let state = ServerState::new(registry, tls.fingerprint_sha256.clone(), inbound_tx)
+        .with_backlog(backlog_tx);
     let broadcast_tx = state.broadcast_tx.clone();
+    let active_ws_clients = Arc::clone(&state.active_ws_clients);
     let mut app = build_router(state);
     if let Some(extra) = extra_routes {
         app = app.merge(extra);
@@ -206,6 +253,7 @@ pub async fn spawn_wss_server_with_routes(
         local_addr,
         fingerprint_sha256: tls.fingerprint_sha256.clone(),
         broadcast_tx,
+        active_ws_clients,
         handle,
         task,
     })
@@ -293,7 +341,23 @@ pub fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
         .filter(|t| !t.is_empty())
 }
 
+struct WsClientCounterGuard(Arc<AtomicUsize>);
+
+impl WsClientCounterGuard {
+    fn enter(counter: &Arc<AtomicUsize>) -> Self {
+        counter.fetch_add(1, Ordering::Relaxed);
+        Self(Arc::clone(counter))
+    }
+}
+
+impl Drop for WsClientCounterGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 async fn handle_ws_socket(mut socket: WebSocket, device_id: String, state: ServerState) {
+    let _client_guard = WsClientCounterGuard::enter(&state.active_ws_clients);
     let mut rx = state.broadcast_tx.subscribe();
 
     if let Ok(welcome) =
@@ -301,6 +365,24 @@ async fn handle_ws_socket(mut socket: WebSocket, device_id: String, state: Serve
         && socket.send(Message::Text(welcome.into())).await.is_err()
     {
         return;
+    }
+
+    if let Some(backlog_tx) = &state.backlog_tx {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        if backlog_tx.send(resp_tx).await.is_ok()
+            && let Ok(Ok(envelopes)) = tokio::time::timeout(Duration::from_secs(2), resp_rx).await
+        {
+            for env in envelopes {
+                if env.validate().is_err() {
+                    continue;
+                }
+                if let Ok(json) = serde_json::to_string(&env)
+                    && socket.send(Message::Text(json.into())).await.is_err()
+                {
+                    return;
+                }
+            }
+        }
     }
 
     loop {

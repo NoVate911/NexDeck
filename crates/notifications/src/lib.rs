@@ -55,6 +55,7 @@ pub struct NotificationEvent {
 
 /// Filter criteria evaluated before surfacing notifications to clients.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct NotificationFilter {
     /// Minimum priority required to pass the filter.
     pub min_priority: NotificationPriority,
@@ -72,6 +73,18 @@ impl Default for NotificationFilter {
 }
 
 impl NotificationFilter {
+    /// Trims, sorts, and deduplicates `muted_origins` entries.
+    pub fn normalize(&mut self) {
+        self.muted_origins = self
+            .muted_origins
+            .iter()
+            .map(|origin| origin.trim().to_owned())
+            .filter(|origin| !origin.is_empty())
+            .collect();
+        self.muted_origins.sort();
+        self.muted_origins.dedup();
+    }
+
     /// Returns `true` if `event` satisfies the filter criteria.
     #[must_use]
     pub fn matches(&self, event: &NotificationEvent) -> bool {
@@ -79,12 +92,32 @@ impl NotificationFilter {
             return false;
         }
         match &event.source {
-            NotificationSource::Application(name) | NotificationSource::Plugin(name) => {
-                !self.muted_origins.iter().any(|muted| muted == name)
-            }
+            NotificationSource::Application(name) | NotificationSource::Plugin(name) => !self
+                .muted_origins
+                .iter()
+                .any(|muted| muted.eq_ignore_ascii_case(name)),
             NotificationSource::WindowsSystem | NotificationSource::HardwareAlert => true,
         }
     }
+}
+
+/// Control operations sent over WSS (`MessageKind::Notification`) to synchronize
+/// dismissal, queue clearing, or filter updates between mobile client and agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum NotificationSyncCommand {
+    /// Dismisses a single notification event by ID.
+    Dismiss {
+        /// Identifier of the event to remove.
+        event_id: u64,
+    },
+    /// Clears all buffered notifications from the host queue.
+    ClearAll,
+    /// Updates active notification filter settings on the host.
+    UpdateFilter {
+        /// Updated priority threshold and muted origins list.
+        filter: NotificationFilter,
+    },
 }
 
 /// Bounded notification queue preserving recent events across sleep/disconnect cycles.
@@ -104,6 +137,16 @@ impl NotificationQueue {
         }
     }
 
+    /// Rebuilds a bounded queue from persisted events, keeping up to `capacity` newest items.
+    #[must_use]
+    pub fn from_items(capacity: usize, items: impl IntoIterator<Item = NotificationEvent>) -> Self {
+        let mut queue = Self::new(capacity);
+        for event in items {
+            queue.push(event);
+        }
+        queue
+    }
+
     /// Enqueues an event, evicting the oldest entry if the queue is full.
     pub fn push(&mut self, event: NotificationEvent) {
         if self.items.len() == self.capacity {
@@ -121,6 +164,41 @@ impl NotificationQueue {
     #[must_use]
     pub fn items(&self) -> Vec<NotificationEvent> {
         self.items.iter().cloned().collect()
+    }
+
+    /// Returns buffered notifications matching `filter` in FIFO order.
+    #[must_use]
+    pub fn items_matching(&self, filter: &NotificationFilter) -> Vec<NotificationEvent> {
+        self.items
+            .iter()
+            .filter(|event| filter.matches(event))
+            .cloned()
+            .collect()
+    }
+
+    /// Removes the notification with matching `event_id` if present.
+    pub fn remove_by_id(&mut self, event_id: u64) -> bool {
+        let before = self.items.len();
+        self.items.retain(|event| event.id != event_id);
+        self.items.len() != before
+    }
+
+    /// Clears all buffered notifications and returns the number of removed entries.
+    pub fn clear(&mut self) -> usize {
+        let count = self.items.len();
+        self.items.clear();
+        count
+    }
+
+    /// Suggests the next unique event identifier strictly above all buffered IDs.
+    #[must_use]
+    pub fn next_id_hint(&self) -> u64 {
+        self.items
+            .iter()
+            .map(|event| event.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
     }
 
     /// Returns the number of currently queued events.
@@ -191,5 +269,35 @@ mod tests {
             NotificationPriority::High,
             "AllowedExampleApp"
         )));
+    }
+
+    #[test]
+    fn queue_supports_reload_filtering_dismiss_clear_and_sync_commands() {
+        let seeded = vec![
+            sample_event(10, NotificationPriority::Low, "ExampleAppA"),
+            sample_event(11, NotificationPriority::High, "MutedApp"),
+            sample_event(12, NotificationPriority::Critical, "ExampleAppB"),
+        ];
+        let mut queue = NotificationQueue::from_items(4, seeded);
+        assert_eq!(queue.next_id_hint(), 13);
+
+        let mut filter = NotificationFilter {
+            min_priority: NotificationPriority::Normal,
+            muted_origins: vec!["  mutedapp  ".to_owned(), "mutedapp".to_owned()],
+        };
+        filter.normalize();
+        assert_eq!(filter.muted_origins, vec!["mutedapp".to_owned()]);
+
+        let matching = queue.items_matching(&filter);
+        assert_eq!(matching.len(), 1);
+        assert_eq!(matching[0].id, 12);
+
+        assert!(queue.remove_by_id(10));
+        assert!(!queue.remove_by_id(999));
+        assert_eq!(queue.clear(), 2);
+        assert!(queue.is_empty());
+
+        let cmd = NotificationSyncCommand::Dismiss { event_id: 12 };
+        assert_eq!(cmd, NotificationSyncCommand::Dismiss { event_id: 12 });
     }
 }

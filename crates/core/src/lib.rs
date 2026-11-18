@@ -4,6 +4,7 @@
 //! [`nexdeck_notifications`], [`nexdeck_approval`], [`nexdeck_api`], and
 //! [`nexdeck_plugin_engine`] with zero heavy UI dependencies.
 
+pub mod alerts;
 pub mod api_routes;
 pub mod autostart;
 pub mod control;
@@ -16,10 +17,12 @@ use std::fmt;
 use nexdeck_api::ClientPolicy;
 use nexdeck_approval::ApprovalRegistry;
 use nexdeck_monitoring::SystemSnapshot;
-use nexdeck_notifications::NotificationQueue;
+use nexdeck_notifications::{NotificationFilter, NotificationQueue};
 use nexdeck_plugin_engine::{PluginError, PluginManifest};
 use nexdeck_transport::TransportKind;
 use serde::{Deserialize, Serialize};
+
+use crate::alerts::AlertThresholds;
 
 /// Crate version synchronized via workspace metadata.
 pub const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -39,6 +42,12 @@ pub struct AgentConfig {
     pub notification_queue_capacity: usize,
     /// Whether the isolated WASM plugin engine is enabled.
     pub enable_plugins: bool,
+    /// Notification priority threshold and muted origins filter.
+    #[serde(default)]
+    pub notification_filter: NotificationFilter,
+    /// Automatic hardware monitoring alert thresholds.
+    #[serde(default)]
+    pub alert_thresholds: AlertThresholds,
 }
 
 impl Default for AgentConfig {
@@ -48,6 +57,8 @@ impl Default for AgentConfig {
             poll_interval_ms: 1_000,
             notification_queue_capacity: 256,
             enable_plugins: false,
+            notification_filter: NotificationFilter::default(),
+            alert_thresholds: AlertThresholds::default(),
         }
     }
 }
