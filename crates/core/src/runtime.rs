@@ -2,21 +2,25 @@
 
 use std::fmt;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use nexdeck_api::clients::{ClientRecord, ClientRegistry};
-use nexdeck_approval::ApprovalRegistry;
+use nexdeck_approval::{ApprovalDecisionMessage, ApprovalRegistry};
 use nexdeck_monitoring::{MetricCollector, SystemSnapshot};
-use nexdeck_notifications::NotificationQueue;
+use nexdeck_notifications::{
+    NotificationEvent, NotificationFilter, NotificationQueue, NotificationSyncCommand,
+};
 use nexdeck_transport::control::{ControlCommandRequest, ControlCommandResponse};
 use nexdeck_transport::pairing::{DeviceRecord, DeviceRegistry, PairingQrPayload};
-use nexdeck_transport::server::{InboundFrame, WssServerHandle, spawn_wss_server_with_routes};
+use nexdeck_transport::server::{InboundFrame, WssServerHandle, spawn_wss_server_with_backlog};
 use nexdeck_transport::tls::HostTlsIdentity;
 use nexdeck_transport::{Envelope, MessageKind, PROTOCOL_VERSION, TransportError};
-use tokio::sync::{RwLock, broadcast, mpsc, watch};
+use tokio::sync::{RwLock, broadcast, mpsc, oneshot, watch};
 use tokio::time::MissedTickBehavior;
 
+use crate::alerts::{AlertThresholds, HardwareAlertMonitor};
 use crate::api_routes::{ApiRouterState, build_api_router};
 use crate::control::{ControlExecutor, default_control_executor};
 use crate::storage::{StorageError, StoragePaths};
@@ -85,6 +89,7 @@ pub struct RunningAgent {
     clients: Arc<RwLock<ClientRegistry>>,
     approvals: Arc<RwLock<ApprovalRegistry>>,
     notifications: Arc<RwLock<NotificationQueue>>,
+    notification_filter: Arc<RwLock<NotificationFilter>>,
     broadcast_rx_source: broadcast::Sender<String>,
     shutdown_tx: watch::Sender<bool>,
     task: tokio::task::JoinHandle<Result<(), RuntimeError>>,
@@ -125,6 +130,12 @@ impl RunningAgent {
     #[must_use]
     pub const fn notifications(&self) -> &Arc<RwLock<NotificationQueue>> {
         &self.notifications
+    }
+
+    /// Returns shared access to the active [`NotificationFilter`].
+    #[must_use]
+    pub const fn notification_filter(&self) -> &Arc<RwLock<NotificationFilter>> {
+        &self.notification_filter
     }
 
     /// Subscribes directly to serialized outbound JSON [`Envelope`] broadcasts.
@@ -255,32 +266,52 @@ pub async fn spawn_agent_runtime_full(
 
     let latest_snapshot: Arc<RwLock<Option<SystemSnapshot>>> = Arc::new(RwLock::new(None));
     let approvals = Arc::new(RwLock::new(ApprovalRegistry::new()));
-    let notifications = Arc::new(RwLock::new(NotificationQueue::new(
+
+    let mut initial_notifications = match &storage {
+        Some(paths) => paths.load_notifications()?,
+        None => Vec::new(),
+    };
+    let initial_queue = NotificationQueue::from_items(
         options.agent.notification_queue_capacity,
-    )));
+        initial_notifications.clone(),
+    );
+    initial_notifications = initial_queue.items();
+    let next_notification_id = Arc::new(AtomicU64::new(initial_queue.next_id_hint()));
+    let notifications = Arc::new(RwLock::new(initial_queue));
+
+    let mut initial_filter = options.agent.notification_filter.clone();
+    initial_filter.normalize();
+    let notification_filter = Arc::new(RwLock::new(initial_filter));
+    let alert_thresholds = Arc::new(RwLock::new(options.agent.alert_thresholds.clone()));
+
     let shared_executor: Arc<Mutex<Box<dyn ControlExecutor + Send>>> =
         Arc::new(Mutex::new(executor));
 
     let (mirror_tx, _) = broadcast::channel::<String>(128);
     let (api_outbound_tx, mut api_outbound_rx) = mpsc::channel::<Envelope>(64);
 
-    let api_router = build_api_router(ApiRouterState::new(
-        Arc::clone(&clients),
-        Arc::clone(&latest_snapshot),
-        Arc::clone(&approvals),
-        Arc::clone(&notifications),
-        Arc::clone(&shared_executor),
-        api_outbound_tx,
-        mirror_tx.clone(),
-    ));
+    let api_router = build_api_router(
+        ApiRouterState::new(
+            Arc::clone(&clients),
+            Arc::clone(&latest_snapshot),
+            Arc::clone(&approvals),
+            Arc::clone(&notifications),
+            Arc::clone(&shared_executor),
+            api_outbound_tx,
+            mirror_tx.clone(),
+        )
+        .with_next_notification_id(Arc::clone(&next_notification_id)),
+    );
 
     let (inbound_tx, mut inbound_rx) = mpsc::channel::<InboundFrame>(64);
-    let server = spawn_wss_server_with_routes(
+    let (backlog_tx, mut backlog_rx) = mpsc::channel::<oneshot::Sender<Vec<Envelope>>>(16);
+    let server = spawn_wss_server_with_backlog(
         options.bind_addr,
         &tls,
         Arc::clone(&registry),
         inbound_tx,
         Some(api_router),
+        Some(backlog_tx),
     )
     .await?;
     let local_addr = server.local_addr();
@@ -297,13 +328,23 @@ pub async fn spawn_agent_runtime_full(
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let registry_for_loop = Arc::clone(&registry);
     let clients_for_loop = Arc::clone(&clients);
+    let notifications_for_loop = Arc::clone(&notifications);
+    let approvals_for_loop = Arc::clone(&approvals);
+    let filter_for_loop = Arc::clone(&notification_filter);
+    let thresholds_for_loop = Arc::clone(&alert_thresholds);
     let snapshot_for_loop = Arc::clone(&latest_snapshot);
     let executor_for_loop = Arc::clone(&shared_executor);
+    let next_notif_id_for_loop = Arc::clone(&next_notification_id);
+    let mut last_saved_notifications = initial_notifications;
+    let mut last_config_mtime = storage
+        .as_ref()
+        .and_then(|p| std::fs::metadata(p.config_path()).ok()?.modified().ok());
 
     let task = tokio::spawn(async move {
         let mut tick = tokio::time::interval(poll_interval);
         tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut sequence_id: u64 = 1;
+        let mut alert_monitor = HardwareAlertMonitor::new();
 
         loop {
             tokio::select! {
@@ -314,26 +355,111 @@ pub async fn spawn_agent_runtime_full(
                         &server,
                         &mut sequence_id,
                     ) {
-                        *snapshot_for_loop.write().await = Some(snapshot);
+                        *snapshot_for_loop.write().await = Some(snapshot.clone());
+                        let thresholds = thresholds_for_loop.read().await.clone();
+                        let alerts = alert_monitor.evaluate(&snapshot, &thresholds, || {
+                            next_notif_id_for_loop.fetch_add(1, Ordering::Relaxed)
+                        });
+                        if !alerts.is_empty() {
+                            let filter = filter_for_loop.read().await.clone();
+                            let mut queue = notifications_for_loop.write().await;
+                            for event in alerts {
+                                queue.push(event.clone());
+                                if filter.matches(&event)
+                                    && let Ok(payload) = serde_json::to_vec(&event)
+                                {
+                                    let env = Envelope::new(
+                                        sequence_id,
+                                        MessageKind::Notification,
+                                        payload,
+                                    );
+                                    sequence_id = next_sequence_id(sequence_id);
+                                    let _ = server.broadcast_envelope(&env);
+                                }
+                            }
+                        }
                     }
+
+                    let newly_expired = {
+                        let mut guard = approvals_for_loop.write().await;
+                        guard.expire_stale(now_epoch_ms())
+                    };
+                    for req in newly_expired {
+                        if let Ok(payload) = serde_json::to_vec(&req) {
+                            let env = Envelope::new(sequence_id, MessageKind::Approval, payload);
+                            sequence_id = next_sequence_id(sequence_id);
+                            let _ = server.broadcast_envelope(&env);
+                        }
+                    }
+
                     if let Some(paths) = &storage {
                         sync_devices_if_changed(paths, &registry_for_loop, &mut last_saved_devices).await?;
                         sync_clients_if_changed(paths, &clients_for_loop, &mut last_saved_clients).await?;
+                        sync_notifications_if_changed(
+                            paths,
+                            &notifications_for_loop,
+                            &mut last_saved_notifications,
+                        )
+                        .await?;
+                        sync_policy_from_config_if_changed(
+                            paths,
+                            &mut last_config_mtime,
+                            &filter_for_loop,
+                            &thresholds_for_loop,
+                        )
+                        .await;
+                    }
+                }
+                maybe_backlog_req = backlog_rx.recv() => {
+                    match maybe_backlog_req {
+                        Some(resp_tx) => {
+                            let envelopes = build_connect_backlog_envelopes(
+                                &snapshot_for_loop,
+                                &notifications_for_loop,
+                                &filter_for_loop,
+                                &approvals_for_loop,
+                                &mut sequence_id,
+                                now_epoch_ms(),
+                            )
+                            .await;
+                            let _ = resp_tx.send(envelopes);
+                        }
+                        None => break,
                     }
                 }
                 maybe_frame = inbound_rx.recv() => {
                     match maybe_frame {
                         Some(frame) => {
-                            if let Ok(exec_guard) = executor_for_loop.lock() {
-                                handle_inbound_frame(&server, exec_guard.as_ref(), &frame, &mut sequence_id);
-                            }
+                            handle_inbound_frame_async(
+                                &server,
+                                &executor_for_loop,
+                                &approvals_for_loop,
+                                &notifications_for_loop,
+                                &filter_for_loop,
+                                storage.as_ref(),
+                                &frame,
+                                &mut sequence_id,
+                            )
+                            .await;
                         }
                         None => break,
                     }
                 }
                 maybe_api_env = api_outbound_rx.recv() => {
                     if let Some(env) = maybe_api_env {
-                        let _ = server.broadcast_envelope(&env);
+                        let allow_broadcast = match env.kind {
+                            MessageKind::Notification => {
+                                if let Ok(event) = serde_json::from_slice::<NotificationEvent>(&env.payload) {
+                                    filter_for_loop.read().await.matches(&event)
+                                } else {
+                                    true
+                                }
+                            }
+                            _ => true,
+                        };
+                        if allow_broadcast {
+                            let _ = server.broadcast_envelope(&env);
+                        }
                     }
                 }
                 changed = shutdown_rx.changed() => {
@@ -347,6 +473,12 @@ pub async fn spawn_agent_runtime_full(
         if let Some(paths) = &storage {
             sync_devices_if_changed(paths, &registry_for_loop, &mut last_saved_devices).await?;
             sync_clients_if_changed(paths, &clients_for_loop, &mut last_saved_clients).await?;
+            sync_notifications_if_changed(
+                paths,
+                &notifications_for_loop,
+                &mut last_saved_notifications,
+            )
+            .await?;
         }
         server.stop().await;
         forwarder.abort();
@@ -360,6 +492,7 @@ pub async fn spawn_agent_runtime_full(
         clients,
         approvals,
         notifications,
+        notification_filter,
         broadcast_rx_source: mirror_tx,
         shutdown_tx,
         task,
@@ -385,15 +518,148 @@ fn publish_telemetry_sample(
     Some(snapshot)
 }
 
-fn handle_inbound_frame(
+#[allow(clippy::too_many_arguments)]
+async fn handle_inbound_frame_async(
     server: &WssServerHandle,
-    executor: &dyn ControlExecutor,
+    executor: &Arc<Mutex<Box<dyn ControlExecutor + Send>>>,
+    approvals: &Arc<RwLock<ApprovalRegistry>>,
+    notifications: &Arc<RwLock<NotificationQueue>>,
+    filter: &Arc<RwLock<NotificationFilter>>,
+    storage: Option<&StoragePaths>,
     frame: &InboundFrame,
     sequence_id: &mut u64,
 ) {
-    if let Some(reply) = build_inbound_reply(executor, frame, *sequence_id) {
+    if frame.envelope.validate().is_err() {
+        return;
+    }
+
+    match frame.envelope.kind {
+        MessageKind::Heartbeat | MessageKind::ControlCommand => {
+            if let Ok(exec_guard) = executor.lock()
+                && let Some(reply) = build_inbound_reply(exec_guard.as_ref(), frame, *sequence_id)
+            {
+                *sequence_id = next_sequence_id(*sequence_id);
+                let _ = server.broadcast_envelope(&reply);
+            }
+        }
+        MessageKind::Approval => {
+            if let Ok(decision) =
+                serde_json::from_slice::<ApprovalDecisionMessage>(&frame.envelope.payload)
+                && let Some(reply) =
+                    process_approval_decision(approvals, &decision, *sequence_id, now_epoch_ms())
+                        .await
+            {
+                *sequence_id = next_sequence_id(*sequence_id);
+                let _ = server.broadcast_envelope(&reply);
+            }
+        }
+        MessageKind::Notification => {
+            if let Ok(cmd) =
+                serde_json::from_slice::<NotificationSyncCommand>(&frame.envelope.payload)
+            {
+                process_notification_sync(notifications, filter, storage, cmd).await;
+            }
+        }
+        MessageKind::Telemetry => {
+            let _ = &frame.device_id;
+        }
+    }
+}
+
+/// Builds initial synchronization [`Envelope`]s sent immediately upon mobile `/ws` connect:
+/// latest telemetry snapshot, filtered sleep-buffered notifications, and active pending approvals.
+pub async fn build_connect_backlog_envelopes(
+    latest_snapshot: &Arc<RwLock<Option<SystemSnapshot>>>,
+    notifications: &Arc<RwLock<NotificationQueue>>,
+    filter: &Arc<RwLock<NotificationFilter>>,
+    approvals: &Arc<RwLock<ApprovalRegistry>>,
+    sequence_id: &mut u64,
+    now_ms: u64,
+) -> Vec<Envelope> {
+    let mut envelopes = Vec::new();
+    if let Some(snapshot) = latest_snapshot.read().await.clone()
+        && let Ok(payload) = serde_json::to_vec(&snapshot)
+    {
+        envelopes.push(Envelope::new(*sequence_id, MessageKind::Telemetry, payload));
         *sequence_id = next_sequence_id(*sequence_id);
-        let _ = server.broadcast_envelope(&reply);
+    }
+
+    let active_filter = filter.read().await.clone();
+    let buffered_notifs = notifications.read().await.items_matching(&active_filter);
+    for event in buffered_notifs {
+        if let Ok(payload) = serde_json::to_vec(&event) {
+            envelopes.push(Envelope::new(
+                *sequence_id,
+                MessageKind::Notification,
+                payload,
+            ));
+            *sequence_id = next_sequence_id(*sequence_id);
+        }
+    }
+
+    let active_approvals = {
+        let mut guard = approvals.write().await;
+        guard.pending_active(now_ms)
+    };
+    for req in active_approvals {
+        if let Ok(payload) = serde_json::to_vec(&req) {
+            envelopes.push(Envelope::new(*sequence_id, MessageKind::Approval, payload));
+            *sequence_id = next_sequence_id(*sequence_id);
+        }
+    }
+
+    envelopes
+}
+
+/// Processes a mobile [`ApprovalDecisionMessage`] against `approvals` and produces an
+/// authoritative [`Envelope`] reflecting the updated (or previously finalized) state.
+pub async fn process_approval_decision(
+    approvals: &Arc<RwLock<ApprovalRegistry>>,
+    decision: &ApprovalDecisionMessage,
+    reply_sequence_id: u64,
+    now_ms: u64,
+) -> Option<Envelope> {
+    let snapshot = {
+        let mut guard = approvals.write().await;
+        match guard.resolve(&decision.request_id, decision.action.trim(), now_ms) {
+            Ok(updated) => Some(updated.clone()),
+            Err(_) => guard.get(&decision.request_id).cloned(),
+        }
+    }?;
+    let payload = serde_json::to_vec(&snapshot).ok()?;
+    Some(Envelope::new(
+        reply_sequence_id,
+        MessageKind::Approval,
+        payload,
+    ))
+}
+
+/// Applies a [`NotificationSyncCommand`] from a connected client to host queues and filters.
+pub async fn process_notification_sync(
+    notifications: &Arc<RwLock<NotificationQueue>>,
+    filter: &Arc<RwLock<NotificationFilter>>,
+    storage: Option<&StoragePaths>,
+    command: NotificationSyncCommand,
+) {
+    match command {
+        NotificationSyncCommand::Dismiss { event_id } => {
+            let mut queue = notifications.write().await;
+            let _ = queue.remove_by_id(event_id);
+        }
+        NotificationSyncCommand::ClearAll => {
+            let mut queue = notifications.write().await;
+            let _ = queue.clear();
+        }
+        NotificationSyncCommand::UpdateFilter { filter: mut next } => {
+            next.normalize();
+            *filter.write().await = next.clone();
+            if let Some(paths) = storage
+                && let Ok(mut settings) = paths.load_or_init_settings()
+            {
+                settings.agent.notification_filter = next;
+                let _ = paths.save_settings(&settings);
+            }
+        }
     }
 }
 
@@ -487,6 +753,40 @@ async fn sync_clients_if_changed(
         *last_saved = current;
     }
     Ok(())
+}
+
+async fn sync_notifications_if_changed(
+    paths: &StoragePaths,
+    notifications: &Arc<RwLock<NotificationQueue>>,
+    last_saved: &mut Vec<NotificationEvent>,
+) -> Result<(), StorageError> {
+    let current = notifications.read().await.items();
+    if current != *last_saved {
+        paths.save_notifications(&current)?;
+        *last_saved = current;
+    }
+    Ok(())
+}
+
+async fn sync_policy_from_config_if_changed(
+    paths: &StoragePaths,
+    last_mtime: &mut Option<SystemTime>,
+    filter: &Arc<RwLock<NotificationFilter>>,
+    thresholds: &Arc<RwLock<AlertThresholds>>,
+) {
+    let current_mtime = std::fs::metadata(paths.config_path())
+        .ok()
+        .and_then(|m| m.modified().ok());
+    if current_mtime.is_none() || current_mtime == *last_mtime {
+        return;
+    }
+    *last_mtime = current_mtime;
+    if let Ok(settings) = paths.load_or_init_settings() {
+        let mut next_filter = settings.agent.notification_filter;
+        next_filter.normalize();
+        *filter.write().await = next_filter;
+        *thresholds.write().await = settings.agent.alert_thresholds;
+    }
 }
 
 fn now_epoch_ms() -> u64 {
@@ -654,5 +954,210 @@ mod tests {
             serde_json::from_slice(&invalid_reply.payload).expect("decode error");
         assert!(!decoded_err.ok);
         assert_eq!(executor.actions(), vec![ControlAction::MediaPlayPause]);
+    }
+
+    #[test]
+    fn processes_approval_decisions_replay_and_notification_sync() {
+        use nexdeck_approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
+        use nexdeck_notifications::{NotificationPriority, NotificationSource};
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        rt.block_on(async {
+            let approvals = Arc::new(RwLock::new(ApprovalRegistry::new()));
+            {
+                let mut guard = approvals.write().await;
+                guard
+                    .register(ApprovalRequest {
+                        request_id: "req-example-1".to_owned(),
+                        application: "ExampleApp".to_owned(),
+                        title: "Confirm action".to_owned(),
+                        description: "Synthetic confirmation".to_owned(),
+                        expires_at_epoch_ms: 50_000,
+                        risk_level: RiskLevel::High,
+                        allowed_actions: vec!["approve".to_owned(), "deny".to_owned()],
+                        status: ApprovalStatus::Pending,
+                    })
+                    .expect("register request");
+            }
+
+            let first_env = process_approval_decision(
+                &approvals,
+                &ApprovalDecisionMessage {
+                    request_id: "req-example-1".to_owned(),
+                    action: "approve".to_owned(),
+                },
+                7,
+                10_000,
+            )
+            .await
+            .expect("decision envelope expected");
+            assert_eq!(first_env.kind, MessageKind::Approval);
+            let resolved: ApprovalRequest =
+                serde_json::from_slice(&first_env.payload).expect("decode approval");
+            assert_eq!(
+                resolved.status,
+                ApprovalStatus::Resolved("approve".to_owned())
+            );
+
+            // Replay attempt with "deny" returns authoritative Resolved("approve") without mutating.
+            let replay_env = process_approval_decision(
+                &approvals,
+                &ApprovalDecisionMessage {
+                    request_id: "req-example-1".to_owned(),
+                    action: "deny".to_owned(),
+                },
+                8,
+                12_000,
+            )
+            .await
+            .expect("authoritative envelope expected");
+            let replay_state: ApprovalRequest =
+                serde_json::from_slice(&replay_env.payload).expect("decode replay state");
+            assert_eq!(
+                replay_state.status,
+                ApprovalStatus::Resolved("approve".to_owned())
+            );
+
+            // Notification sync: Dismiss, UpdateFilter, ClearAll.
+            let queue = Arc::new(RwLock::new(NotificationQueue::new(16)));
+            queue.write().await.push(NotificationEvent {
+                id: 1,
+                source: NotificationSource::Application("ExampleApp".to_owned()),
+                title: "Notify 1".to_owned(),
+                body: "Body 1".to_owned(),
+                priority: NotificationPriority::Normal,
+                created_at_epoch_ms: 1_000,
+            });
+            queue.write().await.push(NotificationEvent {
+                id: 2,
+                source: NotificationSource::HardwareAlert,
+                title: "Notify 2".to_owned(),
+                body: "Body 2".to_owned(),
+                priority: NotificationPriority::High,
+                created_at_epoch_ms: 2_000,
+            });
+            let filter = Arc::new(RwLock::new(NotificationFilter::default()));
+
+            process_notification_sync(
+                &queue,
+                &filter,
+                None,
+                NotificationSyncCommand::Dismiss { event_id: 1 },
+            )
+            .await;
+            assert_eq!(queue.read().await.len(), 1);
+
+            process_notification_sync(
+                &queue,
+                &filter,
+                None,
+                NotificationSyncCommand::UpdateFilter {
+                    filter: NotificationFilter {
+                        min_priority: NotificationPriority::High,
+                        muted_origins: vec![" MutedExample ".to_owned()],
+                    },
+                },
+            )
+            .await;
+            assert_eq!(filter.read().await.min_priority, NotificationPriority::High);
+            assert_eq!(filter.read().await.muted_origins, vec!["MutedExample"]);
+
+            process_notification_sync(&queue, &filter, None, NotificationSyncCommand::ClearAll)
+                .await;
+            assert!(queue.read().await.is_empty());
+        });
+    }
+
+    #[test]
+    fn builds_filtered_connect_backlog_with_telemetry_notifications_and_pending_approvals() {
+        use nexdeck_approval::{ApprovalRequest, ApprovalStatus, RiskLevel};
+        use nexdeck_notifications::{NotificationPriority, NotificationSource};
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        rt.block_on(async {
+            let latest_snapshot = Arc::new(RwLock::new(Some(sample_snapshot())));
+            let notifications = Arc::new(RwLock::new(NotificationQueue::new(10)));
+            {
+                let mut q = notifications.write().await;
+                q.push(NotificationEvent {
+                    id: 1,
+                    source: NotificationSource::Application("MutedExample".to_owned()),
+                    title: "Muted".to_owned(),
+                    body: "Should be filtered out".to_owned(),
+                    priority: NotificationPriority::High,
+                    created_at_epoch_ms: 1_000,
+                });
+                q.push(NotificationEvent {
+                    id: 2,
+                    source: NotificationSource::HardwareAlert,
+                    title: "Buffered hardware event".to_owned(),
+                    body: "Should replay on connect".to_owned(),
+                    priority: NotificationPriority::High,
+                    created_at_epoch_ms: 2_000,
+                });
+            }
+            let filter = Arc::new(RwLock::new(NotificationFilter {
+                min_priority: NotificationPriority::Normal,
+                muted_origins: vec!["MutedExample".to_owned()],
+            }));
+            let approvals = Arc::new(RwLock::new(ApprovalRegistry::new()));
+            {
+                let mut reg = approvals.write().await;
+                reg.register(ApprovalRequest {
+                    request_id: "req-expired".to_owned(),
+                    application: "ExampleApp".to_owned(),
+                    title: "Old".to_owned(),
+                    description: "".to_owned(),
+                    expires_at_epoch_ms: 5_000,
+                    risk_level: RiskLevel::Low,
+                    allowed_actions: vec!["approve".to_owned()],
+                    status: ApprovalStatus::Pending,
+                })
+                .expect("register expired");
+                reg.register(ApprovalRequest {
+                    request_id: "req-active".to_owned(),
+                    application: "ExampleApp".to_owned(),
+                    title: "Live".to_owned(),
+                    description: "".to_owned(),
+                    expires_at_epoch_ms: 20_000,
+                    risk_level: RiskLevel::High,
+                    allowed_actions: vec!["approve".to_owned(), "deny".to_owned()],
+                    status: ApprovalStatus::Pending,
+                })
+                .expect("register active");
+            }
+
+            let mut seq = 10_u64;
+            let envelopes = build_connect_backlog_envelopes(
+                &latest_snapshot,
+                &notifications,
+                &filter,
+                &approvals,
+                &mut seq,
+                10_000,
+            )
+            .await;
+
+            // Expected: 1 Telemetry + 1 matching Notification + 1 active Pending Approval = 3 frames.
+            assert_eq!(envelopes.len(), 3);
+            assert_eq!(envelopes[0].kind, MessageKind::Telemetry);
+            assert_eq!(envelopes[1].kind, MessageKind::Notification);
+            let notif: NotificationEvent =
+                serde_json::from_slice(&envelopes[1].payload).expect("decode notif");
+            assert_eq!(notif.id, 2);
+            assert_eq!(envelopes[2].kind, MessageKind::Approval);
+            let req: ApprovalRequest =
+                serde_json::from_slice(&envelopes[2].payload).expect("decode approval");
+            assert_eq!(req.request_id, "req-active");
+            assert_eq!(seq, 13);
+        });
     }
 }

@@ -87,6 +87,14 @@ impl ApiRouterState {
     fn allocate_envelope_id(&self) -> u64 {
         self.next_envelope_id.fetch_add(1, Ordering::Relaxed)
     }
+
+    /// Overrides the shared monotonic notification ID generator so HTTP API events
+    /// and internal hardware alerts never collide on IDs.
+    #[must_use]
+    pub fn with_next_notification_id(mut self, next_notification_id: Arc<AtomicU64>) -> Self {
+        self.next_notification_id = next_notification_id;
+        self
+    }
 }
 
 /// Builds the Axum [`Router`] serving `/api/v1/*` routes.
