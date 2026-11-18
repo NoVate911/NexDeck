@@ -41,6 +41,10 @@ class AgentController extends ChangeNotifier {
   final ListQueue<double> _ramHistory = ListQueue<double>();
   final ListQueue<double> _networkRxKibHistory = ListQueue<double>();
   final ListQueue<double> _networkTxKibHistory = ListQueue<double>();
+  final List<NotificationEvent> _notifications = <NotificationEvent>[];
+  final List<ApprovalRequest> _approvals = <ApprovalRequest>[];
+  final Set<String> _submittingApprovalIds = <String>{};
+  NotificationFilter _notificationFilter = const NotificationFilter();
   HostSession? _session;
   SystemSnapshot? _latestSnapshot;
   ControlCommandResponse? _lastControlResult;
@@ -93,6 +97,29 @@ class AgentController extends ChangeNotifier {
 
   /// Latest informational status note, if any.
   String? get statusMessage => _statusMessage;
+
+  /// Buffered and live notification feed ordered newest-first.
+  List<NotificationEvent> get notifications =>
+      List<NotificationEvent>.unmodifiable(_notifications);
+
+  /// Remote approval requests (pending first, then resolved/expired history).
+  List<ApprovalRequest> get approvals =>
+      List<ApprovalRequest>.unmodifiable(_approvals);
+
+  /// Active pending approval requests awaiting a single-use decision.
+  List<ApprovalRequest> get pendingApprovals =>
+      _approvals.where((item) => item.isPending).toList(growable: false);
+
+  /// Count of pending approval requests requiring attention.
+  int get pendingApprovalCount =>
+      _approvals.where((item) => item.isPending).length;
+
+  /// Active notification priority and muted-origins filter.
+  NotificationFilter get notificationFilter => _notificationFilter;
+
+  /// Returns `true` while an outbound decision for [requestId] is in flight.
+  bool isSubmittingApproval(String requestId) =>
+      _submittingApprovalIds.contains(requestId);
 
   /// Loads any saved [HostSession] and initiates WSS connection if paired.
   Future<void> initialize() async {
@@ -300,6 +327,107 @@ class AgentController extends ChangeNotifier {
     }
   }
 
+  /// Submits a one-time user decision for a pending remote [ApprovalRequest].
+  Future<void> submitApprovalDecision(String requestId, String action) async {
+    if (_connectionState != TransportConnectionState.connected) {
+      _setError('Подключитесь к хосту перед подтверждением действия.');
+      return;
+    }
+
+    ApprovalRequest? target;
+    for (final entry in _approvals) {
+      if (entry.requestId == requestId) {
+        target = entry;
+        break;
+      }
+    }
+    if (target == null ||
+        !target.isPending ||
+        !target.allowedActions.contains(action)) {
+      _setError('Запрос подтверждения уже закрыт или действие недоступно.');
+      return;
+    }
+    if (!_submittingApprovalIds.add(requestId)) {
+      return;
+    }
+
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final messageId = _nextMessageId++;
+      final decision = ApprovalDecisionMessage(
+        requestId: requestId,
+        action: action,
+      );
+      final envelope = Envelope.json(
+        messageId: messageId,
+        kind: MessageKind.approval,
+        body: decision.toJson(),
+      );
+      await _transport.sendEnvelope(envelope);
+      _statusMessage = 'Отправлен ответ на запрос $requestId: $action';
+    } on Object catch (err) {
+      _errorMessage = 'Не удалось отправить решение: $err';
+    } finally {
+      _submittingApprovalIds.remove(requestId);
+      if (!_disposed) {
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Dismisses a single notification locally and synchronizes dismissal with `nexdeck-agent`.
+  Future<void> dismissNotification(int eventId) async {
+    _notifications.removeWhere((item) => item.id == eventId);
+    if (!_disposed) {
+      notifyListeners();
+    }
+    if (_connectionState == TransportConnectionState.connected) {
+      await _sendNotificationSync(NotificationSyncCommand.dismiss(eventId));
+    }
+  }
+
+  /// Clears all notifications locally and clears the host sleep/disconnect buffer.
+  Future<void> clearNotifications() async {
+    _notifications.clear();
+    _statusMessage = 'Уведомления очищены';
+    if (!_disposed) {
+      notifyListeners();
+    }
+    if (_connectionState == TransportConnectionState.connected) {
+      await _sendNotificationSync(const NotificationSyncCommand.clearAll());
+    }
+  }
+
+  /// Updates active notification priority/origin filters and pushes rules to `nexdeck-agent`.
+  Future<void> updateNotificationFilter(NotificationFilter filter) async {
+    _notificationFilter = filter;
+    _notifications.removeWhere((item) => !filter.allows(item));
+    if (!_disposed) {
+      notifyListeners();
+    }
+    if (_connectionState == TransportConnectionState.connected) {
+      await _sendNotificationSync(NotificationSyncCommand.updateFilter(filter));
+    }
+  }
+
+  Future<void> _sendNotificationSync(NotificationSyncCommand command) async {
+    try {
+      final envelope = Envelope.json(
+        messageId: _nextMessageId++,
+        kind: MessageKind.notification,
+        body: command.toJson(),
+      );
+      await _transport.sendEnvelope(envelope);
+    } on Object catch (err) {
+      _errorMessage = 'Не удалось синхронизировать уведомления: $err';
+      if (!_disposed) {
+        notifyListeners();
+      }
+    }
+  }
+
   /// Disconnects and clears persisted host pairing credentials.
   Future<void> unpairHost() async {
     _manualDisconnect = true;
@@ -315,6 +443,10 @@ class AgentController extends ChangeNotifier {
     _ramHistory.clear();
     _networkRxKibHistory.clear();
     _networkTxKibHistory.clear();
+    _notifications.clear();
+    _approvals.clear();
+    _submittingApprovalIds.clear();
+    _notificationFilter = const NotificationFilter();
     _errorMessage = null;
     _statusMessage = 'Привязка хоста удалена';
     if (!_disposed) {
@@ -382,10 +514,72 @@ class AgentController extends ChangeNotifier {
         _errorMessage = 'Ошибка ответа команды: ${err.message}';
         notifyListeners();
       }
+    } else if (envelope.kind == MessageKind.notification) {
+      try {
+        final event = envelope.decodeNotificationEvent();
+        _upsertNotification(event);
+        _errorMessage = null;
+        notifyListeners();
+      } on FormatException catch (err) {
+        _errorMessage = 'Ошибка декодирования уведомления: ${err.message}';
+        notifyListeners();
+      }
+    } else if (envelope.kind == MessageKind.approval) {
+      try {
+        final request = envelope.decodeApprovalRequest();
+        _upsertApproval(request);
+        _errorMessage = null;
+        _statusMessage = request.isPending
+            ? 'Запрос подтверждения от ${request.application}'
+            : 'Запрос ${request.requestId}: ${request.status.state.displayLabel}';
+        notifyListeners();
+      } on FormatException catch (err) {
+        _errorMessage = 'Ошибка декодирования подтверждения: ${err.message}';
+        notifyListeners();
+      }
     } else if (envelope.kind == MessageKind.heartbeat) {
       _statusMessage = 'Соединение активно (Heartbeat #${envelope.messageId})';
       notifyListeners();
     }
+  }
+
+  void _upsertNotification(NotificationEvent event) {
+    if (!_notificationFilter.allows(event)) {
+      return;
+    }
+    final existingIdx = _notifications.indexWhere(
+      (item) => item.id == event.id,
+    );
+    if (existingIdx >= 0) {
+      _notifications[existingIdx] = event;
+    } else {
+      _notifications.add(event);
+    }
+    _notifications.sort((a, b) => b.id.compareTo(a.id));
+    if (_notifications.length > 100) {
+      _notifications.removeRange(100, _notifications.length);
+    }
+  }
+
+  void _upsertApproval(ApprovalRequest request) {
+    _submittingApprovalIds.remove(request.requestId);
+    final existingIdx = _approvals.indexWhere(
+      (item) => item.requestId == request.requestId,
+    );
+    if (existingIdx >= 0) {
+      _approvals[existingIdx] = request;
+    } else {
+      _approvals.insert(0, request);
+    }
+    final pending = _approvals.where((item) => item.isPending).toList();
+    final settled = _approvals
+        .where((item) => !item.isPending)
+        .take(50)
+        .toList();
+    _approvals
+      ..clear()
+      ..addAll(pending)
+      ..addAll(settled);
   }
 
   void _appendHistory(ListQueue<double> queue, double sample) {

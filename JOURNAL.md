@@ -6,9 +6,9 @@
 
 ## Текущее состояние
 
-- **Актуальный этап:** Этап 5 (Remote Approval и Центр уведомлений) — выполняется **PR 5.1 (ядро Центра уведомлений, буфер сна, аппаратные тревоги и сквозной поток Remote Approval по WSS, Issue #38)**; следующим выполняется **PR 5.2 (клиентский UI центра уведомлений и карточек Remote Approval в `apps/mobile` и `apps/desktop`)**.
+- **Актуальный этап:** Этап 5 (Remote Approval и Центр уведомлений) завершён (**PR 5.1**, Issue #38 / PR #39 + **PR 5.2**, Issue #40 — мобильный Центр уведомлений, карточки Remote Approval и настройки в Desktop Manager); следующим открывается **Этап 6 (Plugin Engine — изолированный WASM-рантайм `crates/plugin_engine`)**.
 - **Версия workspace:** `0.1.0` (Rust Edition 2024, `rust-version = "1.88"`; Flutter `3.50.0` / Dart `3.14.0` в `apps/mobile`).
-- **Последний выполненный шаг:** реализованы протокол и бэклог-синхронизация этапа 5 в `crates/approval` (`ApprovalDecisionMessage`, `expire_stale`, `pending_active`), `crates/notifications` (`NotificationSyncCommand`, фильтрация/нормализация, удаление/очистка), `crates/transport` (`backlog_tx`, `connected_clients()`), а также `crates/core` (`HardwareAlertMonitor` в `alerts.rs`, сохранение буфера сна `notifications.json`, обработка входящих решений WSS и автоматическое истечение таймаутов в `runtime.rs`).
+- **Последний выполненный шаг:** добавлены вкладка «События» и срочный баннер Remote Approval в `apps/mobile` (`NotificationsApprovalView` в `DashboardScreen`, синхронизация фильтра/удаления/решений в `AgentController` с защитой от replay и заметкой о границе Windows UAC), управление фильтром уведомлений, порогами тревог ПК и буфером сна `notifications.json` в `apps/desktop`, а также обновлены архив `stage-5.md` и дорожная карта.
 - **Фактические показатели `nexdeck-agent.exe` (release, LTO + strip):** размер `1 743 360` байт (`~1.66 MiB`); `--measure-ram` — `private=1.23 MiB`, `working_set=6.44 MiB`. `nexdeck-desktop.exe` — `3 614 720` байт.
 - **Согласованные решения:**
   - Сеть и сервер: `tokio` (`current_thread`) + `axum` + `rustls` WSS с пиннингом SHA-256 отпечатка и PIN/QR-pairing ([ADR-0005](docs/architecture/adr/0005-network-stack-tokio-axum-wss.md)), Universal API `/api/v1/*` поверх `axum` ([ADR-0007](docs/architecture/adr/0007-universal-api-http-ws-axum.md)).
@@ -17,10 +17,10 @@
 
 ---
 
-## Что делать следующим (Этап 5 — Remote Approval и Центр уведомлений)
+## Что делать следующим (Этап 6 — Plugin Engine и изолированные WASM-плагины)
 
-1. **Этап 5 (`crates/notifications`, `crates/approval`, `crates/core`, `apps/mobile`, `apps/desktop`):** реализовать сквозной центр уведомлений с буфером сна при отключённом телефоне, интерактивный поток Remote Approval (`approval_requested` / `approval_updated` по WSS -> карточка решения на экране телефона -> возврат решения без обхода Windows UAC) и управление/просмотр в мобильном и десктопном приложениях.
-2. **Этап 6 (`crates/plugin_engine`):** изолированный WASM-движок плагинов (`wasmtime`) с жёсткими квотами памяти/CPU/времени.
+1. **Этап 6 (`crates/plugin_engine`, `crates/core`, `apps/desktop`):** интегрировать изолированный WASM-рантайм (`wasmtime`) с жёсткими квотами памяти/CPU/времени, контролем разрешений (deny-by-default), принудительной остановкой зависших модулей и загрузкой плагинов в `nexdeck-agent`.
+2. **Этап 7 (`crates/transport`, `apps/desktop`, `apps/mobile`):** добавить транспорты USB и Bluetooth, а также mDNS-обнаружение.
 
 ---
 
@@ -56,3 +56,4 @@
 - [Этап 2 — Mobile Client (Flutter-клиент, TLS-пиннинг, графики телеметрии и мультимедиа-управление)](docs/journal/archive/stage-2.md)
 - [Этап 3 — Widget Engine и Desktop Manager (`crates/api`, `apps/desktop`, `apps/mobile`)](docs/journal/archive/stage-3.md)
 - [Этап 4 — Universal API (`crates/api`, `crates/core`, `apps/desktop`, `sdk/`, `examples/`)](docs/journal/archive/stage-4.md)
+- [Этап 5 — Notifications & Remote Approval (`crates/notifications`, `crates/approval`, `crates/core`, `apps/mobile`, `apps/desktop`)](docs/journal/archive/stage-5.md)

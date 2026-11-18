@@ -9,3 +9,4 @@
 - [Этап 2 — Mobile Client (Flutter-клиент, TLS-пиннинг, графики телеметрии и мультимедиа-управление)](stage-2.md)
 - [Этап 3 — Widget Engine и Desktop Manager (`crates/api`, `apps/desktop`, `apps/mobile`)](stage-3.md)
 - [Этап 4 — Universal API (`crates/api`, `crates/core`, `apps/desktop`, `sdk/`, `examples/`)](stage-4.md)
+- [Этап 5 — Notifications & Remote Approval (`crates/notifications`, `crates/approval`, `crates/core`, `apps/mobile`, `apps/desktop`)](stage-5.md)

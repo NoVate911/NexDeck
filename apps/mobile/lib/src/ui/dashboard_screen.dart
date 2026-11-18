@@ -8,6 +8,7 @@ import '../storage/session_store.dart';
 import '../transport/transport_client.dart';
 import 'deck_panel_view.dart';
 import 'formatters.dart';
+import 'notifications_approval_view.dart';
 import 'telemetry_chart.dart';
 
 /// Connected host telemetry, remote media control, and dynamic widget engine dashboard.
@@ -42,13 +43,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final snapshot = widget.controller.latestSnapshot;
     final state = widget.controller.connectionState;
 
+    final pendingApprovals = widget.controller.pendingApprovals;
+    final totalEventBadge =
+        widget.controller.pendingApprovalCount +
+        widget.controller.notifications.length;
+    final title = switch (_selectedTabIndex) {
+      0 => 'NexDeck — Мониторинг ПК',
+      1 => 'NexDeck — Панели виджетов',
+      _ => 'NexDeck — События и подтверждения',
+    };
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          _selectedTabIndex == 0
-              ? 'NexDeck — Мониторинг ПК'
-              : 'NexDeck — Панели виджетов',
-        ),
+        title: Text(title),
         actions: [
           IconButton(
             key: const Key('heartbeat_button'),
@@ -67,70 +74,89 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       body: SafeArea(
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 220),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeInCubic,
-          child: _selectedTabIndex == 0
-              ? ListView(
-                  key: const ValueKey('monitoring_tab_view'),
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    _ConnectionBanner(
-                      session: session,
-                      controller: widget.controller,
-                    ),
-                    const SizedBox(height: 12),
-                    _MediaControlsCard(controller: widget.controller),
-                    const SizedBox(height: 12),
-                    if (snapshot == null)
-                      const Card(
-                        child: Padding(
-                          padding: EdgeInsets.all(20),
-                          child: Text(
-                            'Ожидание первого снимка телеметрии от nexdeck-agent…',
-                          ),
-                        ),
-                      )
-                    else ...[
-                      _CpuCard(
-                        cpu: snapshot.cpu,
-                        uptimeSecs: snapshot.uptimeSecs,
-                        history: widget.controller.cpuHistory,
+        child: Column(
+          children: [
+            if (pendingApprovals.isNotEmpty && _selectedTabIndex != 2)
+              _UrgentApprovalBanner(
+                request: pendingApprovals.first,
+                pendingCount: pendingApprovals.length,
+                onOpenEventsTab: () {
+                  setState(() => _selectedTabIndex = 2);
+                },
+              ),
+            Expanded(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                child: switch (_selectedTabIndex) {
+                  0 => ListView(
+                    key: const ValueKey('monitoring_tab_view'),
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      _ConnectionBanner(
+                        session: session,
+                        controller: widget.controller,
                       ),
                       const SizedBox(height: 12),
-                      _MemoryCard(
-                        memory: snapshot.memory,
-                        history: widget.controller.ramHistory,
-                      ),
-                      if (snapshot.gpus.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        _GpuSection(gpus: snapshot.gpus),
-                      ],
-                      if (snapshot.disks.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        _DiskSection(disks: snapshot.disks),
-                      ],
-                      if (snapshot.networks.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        _NetworkSection(
-                          networks: snapshot.networks,
-                          rxHistoryKib: widget.controller.networkRxKibHistory,
-                          txHistoryKib: widget.controller.networkTxKibHistory,
+                      _MediaControlsCard(controller: widget.controller),
+                      const SizedBox(height: 12),
+                      if (snapshot == null)
+                        const Card(
+                          child: Padding(
+                            padding: EdgeInsets.all(20),
+                            child: Text(
+                              'Ожидание первого снимка телеметрии от nexdeck-agent…',
+                            ),
+                          ),
+                        )
+                      else ...[
+                        _CpuCard(
+                          cpu: snapshot.cpu,
+                          uptimeSecs: snapshot.uptimeSecs,
+                          history: widget.controller.cpuHistory,
                         ),
-                      ],
-                      if (snapshot.battery != null) ...[
                         const SizedBox(height: 12),
-                        _BatteryCard(battery: snapshot.battery!),
+                        _MemoryCard(
+                          memory: snapshot.memory,
+                          history: widget.controller.ramHistory,
+                        ),
+                        if (snapshot.gpus.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          _GpuSection(gpus: snapshot.gpus),
+                        ],
+                        if (snapshot.disks.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          _DiskSection(disks: snapshot.disks),
+                        ],
+                        if (snapshot.networks.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          _NetworkSection(
+                            networks: snapshot.networks,
+                            rxHistoryKib: widget.controller.networkRxKibHistory,
+                            txHistoryKib: widget.controller.networkTxKibHistory,
+                          ),
+                        ],
+                        if (snapshot.battery != null) ...[
+                          const SizedBox(height: 12),
+                          _BatteryCard(battery: snapshot.battery!),
+                        ],
                       ],
                     ],
-                  ],
-                )
-              : DeckPanelView(
-                  key: const ValueKey('panels_tab_view'),
-                  agentController: widget.controller,
-                  deckController: widget.deckController,
-                ),
+                  ),
+                  1 => DeckPanelView(
+                    key: const ValueKey('panels_tab_view'),
+                    agentController: widget.controller,
+                    deckController: widget.deckController,
+                  ),
+                  _ => NotificationsApprovalView(
+                    key: const ValueKey('events_tab_view'),
+                    controller: widget.controller,
+                  ),
+                },
+              ),
+            ),
+          ],
         ),
       ),
       bottomNavigationBar: NavigationBar(
@@ -138,20 +164,97 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onDestinationSelected: (index) {
           setState(() => _selectedTabIndex = index);
         },
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             key: Key('nav_monitoring_tab'),
             icon: Icon(Icons.speed_outlined),
             selectedIcon: Icon(Icons.speed),
             label: 'Мониторинг',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             key: Key('nav_panels_tab'),
             icon: Icon(Icons.grid_view_outlined),
             selectedIcon: Icon(Icons.grid_view_rounded),
             label: 'Панели',
           ),
+          NavigationDestination(
+            key: const Key('nav_events_tab'),
+            icon: Badge.count(
+              count: totalEventBadge,
+              isLabelVisible: totalEventBadge > 0,
+              child: const Icon(Icons.notifications_outlined),
+            ),
+            selectedIcon: Badge.count(
+              count: totalEventBadge,
+              isLabelVisible: totalEventBadge > 0,
+              child: const Icon(Icons.notifications_active),
+            ),
+            label: 'События',
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _UrgentApprovalBanner extends StatelessWidget {
+  const _UrgentApprovalBanner({
+    required this.request,
+    required this.pendingCount,
+    required this.onOpenEventsTab,
+  });
+
+  final ApprovalRequest request;
+  final int pendingCount;
+  final VoidCallback onOpenEventsTab;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Material(
+      key: const Key('urgent_approval_banner'),
+      color: colors.errorContainer.withValues(alpha: 0.72),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: Row(
+          children: [
+            Icon(Icons.security_update_warning, color: colors.error),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    pendingCount > 1
+                        ? 'Ожидают подтверждения ($pendingCount): ${request.application}'
+                        : 'Запрос подтверждения: ${request.application}',
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: colors.onErrorContainer,
+                    ),
+                  ),
+                  Text(
+                    request.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colors.onErrorContainer,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.tonal(
+              key: const Key('urgent_approval_open_button'),
+              onPressed: onOpenEventsTab,
+              child: const Text('Открыть'),
+            ),
+          ],
+        ),
       ),
     );
   }
