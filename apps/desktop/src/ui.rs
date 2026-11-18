@@ -21,6 +21,7 @@ use nexdeck_api::panels::{
     MAX_PANEL_COLUMNS, MIN_PANEL_COLUMNS, WidgetIcon, WidgetKind, WidgetSpec,
 };
 use nexdeck_core::AGENT_VERSION;
+use nexdeck_notifications::{NotificationPriority, NotificationSource};
 
 use crate::qr::QrMatrix;
 use crate::state::{
@@ -1661,6 +1662,10 @@ impl NexDeckDesktopApp {
 
                 ui.add_space(14.0);
 
+                self.draw_notifications_and_alerts_section(ui, theme);
+
+                ui.add_space(14.0);
+
                 // Collapsible Advanced / Developer section (keeps technical fields out of sight by default)
                 fluent_card_compact(ui, theme, |ui| {
                     if ui
@@ -1702,6 +1707,209 @@ impl NexDeckDesktopApp {
                     }
                 });
             });
+    }
+
+    fn draw_notifications_and_alerts_section(&mut self, ui: &mut egui::Ui, theme: ThemePalette) {
+        fluent_card(ui, theme, |ui| {
+            ui.label(
+                RichText::new("Уведомления и тревоги состояния ПК")
+                    .size(15.5)
+                    .strong()
+                    .color(theme.text_primary),
+            );
+            ui.label(
+                RichText::new(
+                    "Настройки фильтрации уведомлений и автоматических предупреждений о перегреве или нагрузке.",
+                )
+                .size(12.0)
+                .color(theme.text_secondary),
+            );
+            ui.add_space(8.0);
+
+            ui.checkbox(
+                &mut self.state.settings_draft.alerts_enabled,
+                "Отправлять на телефон тревоги о высокой нагрузке, температуре и разряде батареи",
+            );
+            ui.add_space(8.0);
+
+            egui::Grid::new("notif_alerts_grid")
+                .num_columns(2)
+                .spacing([14.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label("Минимальный приоритет:");
+                    let current_prio = self.state.settings_draft.min_notification_priority;
+                    egui::ComboBox::from_id_salt("min_notif_priority_combo")
+                        .selected_text(notification_priority_label(current_prio))
+                        .show_ui(ui, |ui| {
+                            for prio in [
+                                NotificationPriority::Low,
+                                NotificationPriority::Normal,
+                                NotificationPriority::High,
+                                NotificationPriority::Critical,
+                            ] {
+                                ui.selectable_value(
+                                    &mut self.state.settings_draft.min_notification_priority,
+                                    prio,
+                                    notification_priority_label(prio),
+                                );
+                            }
+                        });
+                    ui.end_row();
+
+                    ui.label("Заглушённые программы (через запятую):");
+                    ui.add(
+                        egui::TextEdit::singleline(
+                            &mut self.state.settings_draft.muted_origins_csv,
+                        )
+                        .hint_text("Например: ExampleApp, NoisyPlugin"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Порог нагрузки CPU (%):");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.state.settings_draft.alert_cpu_pct)
+                            .desired_width(80.0)
+                            .hint_text("95"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Порог памяти RAM (%):");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.state.settings_draft.alert_ram_pct)
+                            .desired_width(80.0)
+                            .hint_text("95"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Температура CPU (°C):");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.state.settings_draft.alert_cpu_temp_c)
+                            .desired_width(80.0)
+                            .hint_text("90"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Температура GPU (°C):");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.state.settings_draft.alert_gpu_temp_c)
+                            .desired_width(80.0)
+                            .hint_text("90"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Низкий заряд батареи (%):");
+                    ui.add(
+                        egui::TextEdit::singleline(
+                            &mut self.state.settings_draft.alert_battery_low_pct,
+                        )
+                        .desired_width(80.0)
+                        .hint_text("15"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Пауза повтора тревоги (сек):");
+                    ui.add(
+                        egui::TextEdit::singleline(
+                            &mut self.state.settings_draft.alert_cooldown_secs,
+                        )
+                        .desired_width(80.0)
+                        .hint_text("120"),
+                    );
+                    ui.end_row();
+                });
+
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if primary_button(ui, "Сохранить правила", theme).clicked() {
+                    self.state.save_settings_draft();
+                }
+                if secondary_button(ui, "Сбросить изменения", theme).clicked() {
+                    self.state.reset_settings_draft();
+                }
+            });
+        });
+
+        ui.add_space(12.0);
+
+        fluent_card(ui, theme, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "Буфер отложенных уведомлений ({})",
+                        self.state.buffered_notifications.len()
+                    ))
+                    .size(15.5)
+                    .strong()
+                    .color(theme.text_primary),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if !self.state.buffered_notifications.is_empty()
+                        && danger_button(ui, "Очистить буфер", theme).clicked()
+                    {
+                        self.state.clear_notifications_buffer();
+                    }
+                    if secondary_button(ui, "Обновить", theme).clicked() {
+                        self.state.reload_notifications_buffer();
+                    }
+                });
+            });
+            ui.label(
+                RichText::new(
+                    "События сохраняются на диск при отключении телефона или сне ПК и доставляются сразу после подключения.",
+                )
+                .size(12.0)
+                .color(theme.text_secondary),
+            );
+            ui.add_space(8.0);
+
+            if self.state.buffered_notifications.is_empty() {
+                ui.label(
+                    RichText::new("Очередь отложенных уведомлений пуста.")
+                        .color(theme.text_secondary),
+                );
+            } else {
+                for event in self.state.buffered_notifications.iter().take(8) {
+                    egui::Frame::new()
+                        .fill(theme.card_elevated_bg)
+                        .stroke(Stroke::new(1.0_f32, theme.subtle_border))
+                        .corner_radius(CornerRadius::same(8))
+                        .inner_margin(Margin::symmetric(12, 8))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(notification_source_label(&event.source))
+                                        .size(11.5)
+                                        .strong()
+                                        .color(theme.accent),
+                                );
+                                ui.label(
+                                    RichText::new(format!(
+                                        "• {} • #{}",
+                                        notification_priority_label(event.priority),
+                                        event.id
+                                    ))
+                                    .size(11.5)
+                                    .color(theme.text_secondary),
+                                );
+                            });
+                            ui.label(
+                                RichText::new(&event.title)
+                                    .size(13.5)
+                                    .strong()
+                                    .color(theme.text_primary),
+                            );
+                            if !event.body.trim().is_empty() {
+                                ui.label(
+                                    RichText::new(&event.body)
+                                        .size(12.0)
+                                        .color(theme.text_secondary),
+                                );
+                            }
+                        });
+                    ui.add_space(6.0);
+                }
+            }
+        });
     }
 
     fn draw_devices_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, theme: ThemePalette) {
@@ -2339,6 +2547,23 @@ pub fn parse_hex_rgba(raw: &str) -> Option<[u8; 4]> {
             Some([r, g, b, a])
         }
         _ => None,
+    }
+}
+
+fn notification_priority_label(priority: NotificationPriority) -> &'static str {
+    match priority {
+        NotificationPriority::Low => "Низкий (все)",
+        NotificationPriority::Normal => "Обычный",
+        NotificationPriority::High => "Высокий (High+)",
+        NotificationPriority::Critical => "Критический",
+    }
+}
+
+fn notification_source_label(source: &NotificationSource) -> String {
+    match source {
+        NotificationSource::WindowsSystem => "Система Windows".to_owned(),
+        NotificationSource::HardwareAlert => "Датчики ПК".to_owned(),
+        NotificationSource::Application(name) | NotificationSource::Plugin(name) => name.clone(),
     }
 }
 

@@ -1688,6 +1688,7 @@ dependencies = [
  "eframe",
  "nexdeck-api",
  "nexdeck-core",
+ "nexdeck-notifications",
  "nexdeck-transport",
  "serde_json",
 ]

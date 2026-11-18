@@ -26,12 +26,12 @@
 - Базовые виджеты, сохранение, импорт и экспорт конфигураций.
 - Графическая оболочка `nexdeck-desktop` на чистом Rust UI.
 
-### Этап 4 — Universal API (`crates/api`, `sdk/`, `examples/`)
+### Этап 4 — Universal API (`crates/api`, `sdk/`, `examples/`, завершён)
 - Локальный IPC (Named Pipes / сокеты), HTTP и WebSocket API.
 - Регистрация приложений, выдача и отзыв токенов с ограниченными правами.
 - Клиентские SDK и примеры интеграции.
 
-### Этап 5 — Notifications & Remote Approval (`crates/notifications`, `crates/approval`)
+### Этап 5 — Notifications & Remote Approval (`crates/notifications`, `crates/approval`, завершён)
 - Центр уведомлений Windows и аппаратных событий с буфером сна.
 - Сквозной сценарий Remote Approval: запрос от внешнего приложения -> экран телефона -> возврат решения.
 

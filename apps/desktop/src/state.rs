@@ -21,11 +21,13 @@ use nexdeck_api::panels::{
     WidgetSpec, WidgetStyle,
 };
 use nexdeck_core::AGENT_VERSION;
+use nexdeck_core::alerts::AlertThresholds;
 use nexdeck_core::autostart::{
     AutostartError, format_autostart_command, install_autostart, query_autostart,
     uninstall_autostart,
 };
 use nexdeck_core::storage::{AgentSettings, StoragePaths};
+use nexdeck_notifications::{NotificationEvent, NotificationFilter, NotificationPriority};
 use nexdeck_transport::control::ControlAction;
 use nexdeck_transport::pairing::{DeviceRecord, PairingQrPayload};
 use nexdeck_transport::{PROTOCOL_VERSION, TransportKind};
@@ -264,6 +266,24 @@ pub struct SettingsDraft {
     pub notification_queue_capacity: String,
     /// Whether the isolated WASM plugin engine is enabled.
     pub enable_plugins: bool,
+    /// Minimum priority forwarded/buffered for notifications.
+    pub min_notification_priority: NotificationPriority,
+    /// Comma-separated muted application/plugin names.
+    pub muted_origins_csv: String,
+    /// Whether automated hardware threshold monitoring is enabled.
+    pub alerts_enabled: bool,
+    /// CPU load alert threshold (`0..=100`, empty = disabled).
+    pub alert_cpu_pct: String,
+    /// RAM utilization alert threshold (`0..=100`, empty = disabled).
+    pub alert_ram_pct: String,
+    /// CPU temperature alert threshold in °C (empty = disabled).
+    pub alert_cpu_temp_c: String,
+    /// GPU temperature alert threshold in °C (empty = disabled).
+    pub alert_gpu_temp_c: String,
+    /// Low battery alert threshold (`0..=100`, empty = disabled).
+    pub alert_battery_low_pct: String,
+    /// Cooldown in seconds between repeated hardware alerts of the same kind.
+    pub alert_cooldown_secs: String,
 }
 
 impl SettingsDraft {
@@ -276,6 +296,15 @@ impl SettingsDraft {
             poll_interval_ms: settings.agent.poll_interval_ms.to_string(),
             notification_queue_capacity: settings.agent.notification_queue_capacity.to_string(),
             enable_plugins: settings.agent.enable_plugins,
+            min_notification_priority: settings.agent.notification_filter.min_priority,
+            muted_origins_csv: settings.agent.notification_filter.muted_origins.join(", "),
+            alerts_enabled: settings.agent.alert_thresholds.enabled,
+            alert_cpu_pct: format_opt_num(settings.agent.alert_thresholds.cpu_usage_pct),
+            alert_ram_pct: format_opt_num(settings.agent.alert_thresholds.ram_usage_pct),
+            alert_cpu_temp_c: format_opt_num(settings.agent.alert_thresholds.cpu_temp_c),
+            alert_gpu_temp_c: format_opt_num(settings.agent.alert_thresholds.gpu_temp_c),
+            alert_battery_low_pct: format_opt_num(settings.agent.alert_thresholds.battery_low_pct),
+            alert_cooldown_secs: settings.agent.alert_thresholds.cooldown_secs.to_string(),
         }
     }
 
@@ -313,6 +342,37 @@ impl SettingsDraft {
             );
         }
 
+        let mut notification_filter = NotificationFilter {
+            min_priority: self.min_notification_priority,
+            muted_origins: self
+                .muted_origins_csv
+                .split(',')
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(ToOwned::to_owned)
+                .collect(),
+        };
+        notification_filter.normalize();
+
+        let cooldown_secs: u64 = self
+            .alert_cooldown_secs
+            .trim()
+            .parse()
+            .map_err(|_| "Пауза повтора тревоги должна быть целым числом (сек).".to_owned())?;
+
+        let alert_thresholds = AlertThresholds {
+            enabled: self.alerts_enabled,
+            cpu_usage_pct: parse_opt_pct(&self.alert_cpu_pct, "Порог CPU (%)")?,
+            ram_usage_pct: parse_opt_pct(&self.alert_ram_pct, "Порог RAM (%)")?,
+            cpu_temp_c: parse_opt_temp(&self.alert_cpu_temp_c, "Порог темп. CPU (°C)")?,
+            gpu_temp_c: parse_opt_temp(&self.alert_gpu_temp_c, "Порог темп. GPU (°C)")?,
+            battery_low_pct: parse_opt_pct(
+                &self.alert_battery_low_pct,
+                "Низкий заряд батареи (%)",
+            )?,
+            cooldown_secs,
+        };
+
         let mut next = template.clone();
         next.bind_addr = self.bind_addr.trim().to_owned();
         next.san_hosts = san_hosts;
@@ -320,12 +380,54 @@ impl SettingsDraft {
         next.agent.poll_interval_ms = poll_interval_ms;
         next.agent.notification_queue_capacity = queue_capacity;
         next.agent.enable_plugins = self.enable_plugins;
+        next.agent.notification_filter = notification_filter;
+        next.agent.alert_thresholds = alert_thresholds;
 
         let _ = next
             .validate()
             .map_err(|err| format!("Ошибка проверки настроек: {err}"))?;
         Ok(next)
     }
+}
+
+fn format_opt_num<T: ToString>(value: Option<T>) -> String {
+    value.map_or_else(String::new, |num| num.to_string())
+}
+
+fn parse_opt_pct(raw: &str, label: &str) -> Result<Option<u8>, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let val: u8 = trimmed
+        .parse()
+        .map_err(|_| format!("{label}: введите целое число от 1 до 100 или оставьте пустым."))?;
+    if val > 100 || val == 0 {
+        return Err(format!("{label}: допустимое значение от 1 до 100%."));
+    }
+    Ok(Some(val))
+}
+
+fn parse_opt_temp(raw: &str, label: &str) -> Result<Option<u16>, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let val: u16 = trimmed
+        .parse()
+        .map_err(|_| format!("{label}: введите целую температуру (°C) или оставьте пустым."))?;
+    if !(20..=150).contains(&val) {
+        return Err(format!("{label}: допустимое значение от 20 до 150 °C."));
+    }
+    Ok(Some(val))
+}
+
+fn load_sorted_notifications(paths: &StoragePaths) -> Result<Vec<NotificationEvent>, String> {
+    let mut events = paths
+        .load_notifications()
+        .map_err(|err| format!("Ошибка чтения notifications.json: {err}"))?;
+    events.sort_by_key(|event| std::cmp::Reverse(event.id));
+    Ok(events)
 }
 
 /// Complete Desktop Manager state persisted across [`StoragePaths`].
@@ -344,6 +446,8 @@ pub struct DesktopManagerState {
     pub devices: Vec<DeviceRecord>,
     /// Registered Universal API applications (`clients.json`, token hashes only).
     pub api_clients: Vec<ClientRecord>,
+    /// Buffered notifications queued across sleep/disconnect cycles (`notifications.json`).
+    pub buffered_notifications: Vec<NotificationEvent>,
     /// Draft application ID for registering a new API client.
     pub new_api_client_id: String,
     /// Draft application display name for registering a new API client.
@@ -399,6 +503,7 @@ impl DesktopManagerState {
         let api_clients = paths
             .load_clients()
             .map_err(|err| format!("Не удалось загрузить clients.json: {err}"))?;
+        let buffered_notifications = load_sorted_notifications(&paths)?;
         let tls = paths
             .load_or_create_tls_identity(&settings.san_hosts)
             .map_err(|err| format!("Не удалось загрузить TLS-идентичность: {err}"))?;
@@ -427,6 +532,7 @@ impl DesktopManagerState {
             settings_draft,
             devices,
             api_clients,
+            buffered_notifications,
             new_api_client_id: "org.example.client".to_owned(),
             new_api_client_name: "ExampleApp".to_owned(),
             new_api_client_permissions: [true, true, true, false, false],
@@ -477,6 +583,13 @@ impl DesktopManagerState {
                 return;
             }
         }
+        match load_sorted_notifications(&self.paths) {
+            Ok(events) => self.buffered_notifications = events,
+            Err(msg) => {
+                self.error_message = Some(msg);
+                return;
+            }
+        }
         match self
             .paths
             .load_or_create_tls_identity(&self.settings.san_hosts)
@@ -517,6 +630,38 @@ impl DesktopManagerState {
         self.clear_alerts();
         self.settings_draft = SettingsDraft::from_settings(&self.settings);
         self.status_message = Some("Изменения формы настроек сброшены.".to_owned());
+    }
+
+    /// Reloads persisted sleep/disconnect notifications from `notifications.json`.
+    pub fn reload_notifications_buffer(&mut self) {
+        self.clear_alerts();
+        match load_sorted_notifications(&self.paths) {
+            Ok(events) => {
+                self.buffered_notifications = events;
+                self.status_message = Some(format!(
+                    "Обновлён буфер уведомлений ({} записей).",
+                    self.buffered_notifications.len()
+                ));
+            }
+            Err(msg) => {
+                self.error_message = Some(msg);
+            }
+        }
+    }
+
+    /// Clears all persisted sleep/disconnect notifications from `notifications.json`.
+    pub fn clear_notifications_buffer(&mut self) {
+        self.clear_alerts();
+        match self.paths.save_notifications(&[]) {
+            Ok(()) => {
+                self.buffered_notifications.clear();
+                self.status_message =
+                    Some("Буфер уведомлений очищен (notifications.json).".to_owned());
+            }
+            Err(err) => {
+                self.error_message = Some(format!("Не удалось очистить notifications.json: {err}"));
+            }
+        }
     }
 
     /// Installs or removes Windows current-user autostart targeting `nexdeck-agent`.
@@ -2381,6 +2526,80 @@ mod tests {
         let exe = dir.join(name);
         fs::write(&exe, b"placeholder").expect("write placeholder file");
         assert_eq!(resolve_agent_exe_in_dir(&dir), Some(exe));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn persists_notification_filter_alert_thresholds_and_clears_buffer() {
+        use nexdeck_notifications::NotificationSource;
+
+        let dir = unique_temp_dir("notif_policy");
+        let paths = StoragePaths::new(dir.clone());
+        let mut state = DesktopManagerState::load(paths.clone()).expect("load desktop state");
+
+        state.settings_draft.min_notification_priority = NotificationPriority::High;
+        state.settings_draft.muted_origins_csv = "ExampleApp, NoisyPlugin".to_owned();
+        state.settings_draft.alerts_enabled = true;
+        state.settings_draft.alert_cpu_pct = "88".to_owned();
+        state.settings_draft.alert_cpu_temp_c = "82".to_owned();
+        state.settings_draft.alert_cooldown_secs = "45".to_owned();
+        state.save_settings_draft();
+        assert!(state.error_message.is_none());
+
+        let events = vec![
+            NotificationEvent {
+                id: 1,
+                source: NotificationSource::HardwareAlert,
+                title: "CPU Temp High".to_owned(),
+                body: "Reached 85C".to_owned(),
+                priority: NotificationPriority::High,
+                created_at_epoch_ms: 1_700_000_000_001,
+            },
+            NotificationEvent {
+                id: 2,
+                source: NotificationSource::Application("ExampleBackup".to_owned()),
+                title: "Backup Finished".to_owned(),
+                body: "Completed cleanly".to_owned(),
+                priority: NotificationPriority::Normal,
+                created_at_epoch_ms: 1_700_000_000_002,
+            },
+        ];
+        paths
+            .save_notifications(&events)
+            .expect("persist synthetic sleep buffer");
+
+        let mut reloaded =
+            DesktopManagerState::load(paths.clone()).expect("reload updated desktop state");
+        assert_eq!(
+            reloaded.settings.agent.notification_filter.min_priority,
+            NotificationPriority::High
+        );
+        assert_eq!(
+            reloaded.settings.agent.notification_filter.muted_origins,
+            vec!["ExampleApp".to_owned(), "NoisyPlugin".to_owned()]
+        );
+        assert_eq!(
+            reloaded.settings.agent.alert_thresholds.cpu_usage_pct,
+            Some(88)
+        );
+        assert_eq!(
+            reloaded.settings.agent.alert_thresholds.cpu_temp_c,
+            Some(82)
+        );
+        assert_eq!(reloaded.settings.agent.alert_thresholds.cooldown_secs, 45);
+        assert_eq!(reloaded.buffered_notifications.len(), 2);
+        assert_eq!(reloaded.buffered_notifications[0].id, 2);
+
+        reloaded.clear_notifications_buffer();
+        assert!(reloaded.error_message.is_none());
+        assert!(reloaded.buffered_notifications.is_empty());
+        assert!(
+            paths
+                .load_notifications()
+                .expect("reload empty buffer")
+                .is_empty()
+        );
+
         let _ = fs::remove_dir_all(&dir);
     }
 }

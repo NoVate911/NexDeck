@@ -156,6 +156,26 @@ class Envelope {
     return ControlCommandResponse.fromJson(decodePayloadJson());
   }
 
+  /// Decodes a [NotificationEvent] from a `Notification` envelope.
+  NotificationEvent decodeNotificationEvent() {
+    if (kind != MessageKind.notification) {
+      throw FormatException(
+        'Expected Notification envelope, received "${kind.wireName}".',
+      );
+    }
+    return NotificationEvent.fromJson(decodePayloadJson());
+  }
+
+  /// Decodes an [ApprovalRequest] from an `Approval` envelope.
+  ApprovalRequest decodeApprovalRequest() {
+    if (kind != MessageKind.approval) {
+      throw FormatException(
+        'Expected Approval envelope, received "${kind.wireName}".',
+      );
+    }
+    return ApprovalRequest.fromJson(decodePayloadJson());
+  }
+
   /// Serializes this envelope into wire JSON matching `crates/transport`.
   Map<String, Object?> toJson() {
     validate();
@@ -431,4 +451,460 @@ class ControlCommandResponse {
 
   /// Diagnostic status message from the host agent.
   final String message;
+}
+
+/// Urgency level of a [NotificationEvent] matching `NotificationPriority`.
+enum NotificationPriority {
+  /// Low-priority background status message.
+  low('Low', 'Низкий'),
+
+  /// Standard notification priority.
+  normal('Normal', 'Обычный'),
+
+  /// Elevated notification (e.g. hardware threshold alert).
+  high('High', 'Высокий'),
+
+  /// Critical urgent event.
+  critical('Critical', 'Критичный');
+
+  const NotificationPriority(this.wireName, this.displayLabel);
+
+  /// Exact enum name serialized by `nexdeck-notifications`.
+  final String wireName;
+
+  /// Localized Russian label for UI chips and badges.
+  final String displayLabel;
+
+  /// Returns `true` when this priority meets or exceeds [minimum].
+  bool meetsMinimum(NotificationPriority minimum) => index >= minimum.index;
+
+  /// Parses [wireName] into [NotificationPriority].
+  static NotificationPriority fromWireName(String wireName) {
+    for (final value in values) {
+      if (value.wireName == wireName) {
+        return value;
+      }
+    }
+    throw FormatException('Unsupported NotificationPriority "$wireName".');
+  }
+}
+
+/// Origin category of a [NotificationEvent].
+enum NotificationSourceKind {
+  /// Windows OS shell / system event.
+  windowsSystem('WindowsSystem', 'Система Windows'),
+
+  /// Host hardware threshold or power alert.
+  hardwareAlert('HardwareAlert', 'Датчики ПК'),
+
+  /// Registered external application using Universal API.
+  application('Application', 'Приложение'),
+
+  /// Sandboxed WebAssembly plugin.
+  plugin('Plugin', 'Плагин');
+
+  const NotificationSourceKind(this.wireName, this.displayLabel);
+
+  /// Exact internally tagged enum variant name used by Rust serde.
+  final String wireName;
+
+  /// Localized category label.
+  final String displayLabel;
+
+  /// Parses [wireName] into [NotificationSourceKind].
+  static NotificationSourceKind fromWireName(String wireName) {
+    for (final value in values) {
+      if (value.wireName == wireName) {
+        return value;
+      }
+    }
+    throw FormatException('Unsupported NotificationSource kind "$wireName".');
+  }
+}
+
+/// Origin descriptor matching `NotificationSource` in `crates/notifications`.
+class NotificationSource {
+  /// Creates a [NotificationSource].
+  const NotificationSource({required this.kind, this.name});
+
+  /// Decodes internally tagged `NotificationSource` JSON.
+  factory NotificationSource.fromJson(Map<String, Object?> json) {
+    final kind = NotificationSourceKind.fromWireName(
+      readRequired<String>(json, 'kind'),
+    );
+    final name = switch (kind) {
+      NotificationSourceKind.application ||
+      NotificationSourceKind.plugin => readRequired<String>(json, 'name'),
+      NotificationSourceKind.windowsSystem ||
+      NotificationSourceKind.hardwareAlert => null,
+    };
+    return NotificationSource(kind: kind, name: name);
+  }
+
+  /// Category of emitter.
+  final NotificationSourceKind kind;
+
+  /// Specific application or plugin name when applicable.
+  final String? name;
+
+  /// Human-readable origin label shown inside notification cards.
+  String get originLabel =>
+      name?.trim().isNotEmpty == true ? name!.trim() : kind.displayLabel;
+
+  /// Matches the origin identifier checked by host `NotificationFilter`.
+  String get filterOriginKey => name ?? kind.wireName;
+
+  /// Serializes this source to wire JSON.
+  Map<String, Object?> toJson() => {
+    'kind': kind.wireName,
+    if (name != null) 'name': name,
+  };
+}
+
+/// Notification center item matching `NotificationEvent` in `crates/notifications`.
+class NotificationEvent {
+  /// Creates a [NotificationEvent].
+  const NotificationEvent({
+    required this.id,
+    required this.source,
+    required this.title,
+    required this.body,
+    required this.priority,
+    required this.createdAtEpochMs,
+  });
+
+  /// Decodes a [NotificationEvent] from wire JSON.
+  factory NotificationEvent.fromJson(Map<String, Object?> json) {
+    return NotificationEvent(
+      id: readRequired<int>(json, 'id'),
+      source: NotificationSource.fromJson(readRequiredMap(json, 'source')),
+      title: readRequired<String>(json, 'title'),
+      body: readRequired<String>(json, 'body'),
+      priority: NotificationPriority.fromWireName(
+        readRequired<String>(json, 'priority'),
+      ),
+      createdAtEpochMs: readRequired<int>(json, 'created_at_epoch_ms'),
+    );
+  }
+
+  /// Monotonic notification identifier assigned by `nexdeck-agent`.
+  final int id;
+
+  /// Notification origin metadata.
+  final NotificationSource source;
+
+  /// Concise headline.
+  final String title;
+
+  /// Notification body message.
+  final String body;
+
+  /// Assigned priority level.
+  final NotificationPriority priority;
+
+  /// Creation timestamp in Unix epoch milliseconds.
+  final int createdAtEpochMs;
+
+  /// Serializes this event back to wire JSON.
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'source': source.toJson(),
+    'title': title,
+    'body': body,
+    'priority': priority.wireName,
+    'created_at_epoch_ms': createdAtEpochMs,
+  };
+}
+
+/// Mobile-side and host-synchronized notification filter rules.
+class NotificationFilter {
+  /// Creates a [NotificationFilter].
+  const NotificationFilter({
+    this.minPriority = NotificationPriority.low,
+    this.mutedOrigins = const [],
+  });
+
+  /// Decodes [NotificationFilter] from wire JSON.
+  factory NotificationFilter.fromJson(Map<String, Object?> json) {
+    final rawMuted =
+        readOptional<List<Object?>>(json, 'muted_origins') ?? const [];
+    final muted = <String>[
+      for (final item in rawMuted)
+        if (item is String && item.trim().isNotEmpty) item.trim(),
+    ];
+    return NotificationFilter(
+      minPriority: NotificationPriority.fromWireName(
+        readOptional<String>(json, 'min_priority') ??
+            NotificationPriority.low.wireName,
+      ),
+      mutedOrigins: List<String>.unmodifiable(muted),
+    );
+  }
+
+  /// Minimum priority allowed through the notification feed.
+  final NotificationPriority minPriority;
+
+  /// Case-insensitive list of muted application/plugin/system origins.
+  final List<String> mutedOrigins;
+
+  /// Returns `true` if [event] passes priority and muted-origin checks.
+  bool allows(NotificationEvent event) {
+    if (!event.priority.meetsMinimum(minPriority)) {
+      return false;
+    }
+    final originName = switch (event.source.kind) {
+      NotificationSourceKind.application ||
+      NotificationSourceKind.plugin => event.source.name?.trim().toLowerCase(),
+      NotificationSourceKind.windowsSystem ||
+      NotificationSourceKind.hardwareAlert => null,
+    };
+    if (originName == null || originName.isEmpty) {
+      return true;
+    }
+    for (final raw in mutedOrigins) {
+      final muted = raw.trim().toLowerCase();
+      if (muted.isNotEmpty && muted == originName) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Serializes this filter to wire JSON.
+  Map<String, Object?> toJson() => {
+    'min_priority': minPriority.wireName,
+    'muted_origins': mutedOrigins,
+  };
+}
+
+/// Outbound WebSocket synchronization command sent over `MessageKind.notification`.
+class NotificationSyncCommand {
+  const NotificationSyncCommand._({
+    required this.op,
+    this.eventId,
+    this.filter,
+  });
+
+  /// Dismisses a single notification ID across connected devices and host buffer.
+  const NotificationSyncCommand.dismiss(int eventId)
+    : this._(op: 'dismiss', eventId: eventId);
+
+  /// Clears all buffered notifications on host and mobile clients.
+  const NotificationSyncCommand.clearAll() : this._(op: 'clear_all');
+
+  /// Pushes updated notification filter rules to the host agent.
+  const NotificationSyncCommand.updateFilter(NotificationFilter filter)
+    : this._(op: 'update_filter', filter: filter);
+
+  /// Tag matched by `#[serde(tag = "op", rename_all = "snake_case")]`.
+  final String op;
+
+  /// Target notification ID for `dismiss`.
+  final int? eventId;
+
+  /// Updated filter payload for `update_filter`.
+  final NotificationFilter? filter;
+
+  /// Serializes this sync command to wire JSON.
+  Map<String, Object?> toJson() => {
+    'op': op,
+    if (eventId != null) 'event_id': eventId,
+    if (filter != null) 'filter': filter!.toJson(),
+  };
+}
+
+/// Security risk classification matching `RiskLevel` in `crates/approval`.
+enum RiskLevel {
+  /// Routine low-impact action.
+  low('Low', 'Низкий риск'),
+
+  /// Moderate-impact confirmation.
+  medium('Medium', 'Средний риск'),
+
+  /// Sensitive host state or file modification.
+  high('High', 'Высокий риск'),
+
+  /// Critical action requiring explicit scrutiny.
+  critical('Critical', 'Критический риск');
+
+  const RiskLevel(this.wireName, this.displayLabel);
+
+  /// Exact enum name serialized by `nexdeck-approval`.
+  final String wireName;
+
+  /// Localized Russian risk badge text.
+  final String displayLabel;
+
+  /// Parses [wireName] into [RiskLevel].
+  static RiskLevel fromWireName(String wireName) {
+    for (final value in values) {
+      if (value.wireName == wireName) {
+        return value;
+      }
+    }
+    throw FormatException('Unsupported RiskLevel "$wireName".');
+  }
+}
+
+/// State tag inside [ApprovalStatus].
+enum ApprovalStatusState {
+  /// Request is active and awaiting user action before expiry.
+  pending('Pending', 'Ожидает решения'),
+
+  /// Single-use decision has already been recorded.
+  resolved('Resolved', 'Решено'),
+
+  /// Request TTL elapsed before user action.
+  expired('Expired', 'Истёк срок'),
+
+  /// Request was cancelled by the originating application/agent.
+  revoked('Revoked', 'Отозвано');
+
+  const ApprovalStatusState(this.wireName, this.displayLabel);
+
+  /// Exact internally tagged serde variant name.
+  final String wireName;
+
+  /// Localized Russian label.
+  final String displayLabel;
+
+  /// Parses [wireName] into [ApprovalStatusState].
+  static ApprovalStatusState fromWireName(String wireName) {
+    for (final value in values) {
+      if (value.wireName == wireName) {
+        return value;
+      }
+    }
+    throw FormatException('Unsupported ApprovalStatus state "$wireName".');
+  }
+}
+
+/// Lifecycle state of an [ApprovalRequest].
+class ApprovalStatus {
+  /// Creates an [ApprovalStatus].
+  const ApprovalStatus({required this.state, this.selectedAction});
+
+  /// Decodes internally tagged `ApprovalStatus` JSON.
+  factory ApprovalStatus.fromJson(Map<String, Object?> json) {
+    final state = ApprovalStatusState.fromWireName(
+      readRequired<String>(json, 'state'),
+    );
+    final selectedAction = state == ApprovalStatusState.resolved
+        ? readRequired<String>(json, 'selected_action')
+        : null;
+    return ApprovalStatus(state: state, selectedAction: selectedAction);
+  }
+
+  /// Current lifecycle state.
+  final ApprovalStatusState state;
+
+  /// Action chosen when [state] is [ApprovalStatusState.resolved].
+  final String? selectedAction;
+
+  /// Returns `true` when the request is still awaiting a one-time decision.
+  bool get isPending => state == ApprovalStatusState.pending;
+
+  /// Serializes this status to wire JSON.
+  Map<String, Object?> toJson() => {
+    'state': state.wireName,
+    if (selectedAction != null) 'selected_action': selectedAction,
+  };
+}
+
+/// Remote approval prompt matching `ApprovalRequest` in `crates/approval`.
+class ApprovalRequest {
+  /// Creates an [ApprovalRequest].
+  const ApprovalRequest({
+    required this.requestId,
+    required this.application,
+    required this.title,
+    required this.description,
+    required this.expiresAtEpochMs,
+    required this.riskLevel,
+    required this.allowedActions,
+    required this.status,
+  });
+
+  /// Decodes an [ApprovalRequest] from wire JSON.
+  factory ApprovalRequest.fromJson(Map<String, Object?> json) {
+    final rawActions = readRequired<List<Object?>>(json, 'allowed_actions');
+    final actions = <String>[];
+    for (final entry in rawActions) {
+      if (entry is! String || entry.trim().isEmpty) {
+        throw const FormatException(
+          'Invalid action identifier in ApprovalRequest.allowed_actions.',
+        );
+      }
+      actions.add(entry.trim());
+    }
+    return ApprovalRequest(
+      requestId: readRequired<String>(json, 'request_id'),
+      application: readRequired<String>(json, 'application'),
+      title: readRequired<String>(json, 'title'),
+      description: readRequired<String>(json, 'description'),
+      expiresAtEpochMs: readRequired<int>(json, 'expires_at_epoch_ms'),
+      riskLevel: RiskLevel.fromWireName(
+        readRequired<String>(json, 'risk_level'),
+      ),
+      allowedActions: List<String>.unmodifiable(actions),
+      status: ApprovalStatus.fromJson(readRequiredMap(json, 'status')),
+    );
+  }
+
+  /// Unique single-use request identifier bound to this action.
+  final String requestId;
+
+  /// Human-readable originating application name.
+  final String application;
+
+  /// Prompt headline.
+  final String title;
+
+  /// Detailed description of the requested operation.
+  final String description;
+
+  /// Expiration deadline in Unix epoch milliseconds.
+  final int expiresAtEpochMs;
+
+  /// Risk classification.
+  final RiskLevel riskLevel;
+
+  /// Allowlisted decision action identifiers (for example `approve`, `deny`).
+  final List<String> allowedActions;
+
+  /// Current authoritative approval lifecycle state.
+  final ApprovalStatus status;
+
+  /// Returns `true` when this request is still awaiting user input.
+  bool get isPending => status.isPending;
+
+  /// Serializes this request back to wire JSON.
+  Map<String, Object?> toJson() => {
+    'request_id': requestId,
+    'application': application,
+    'title': title,
+    'description': description,
+    'expires_at_epoch_ms': expiresAtEpochMs,
+    'risk_level': riskLevel.wireName,
+    'allowed_actions': allowedActions,
+    'status': status.toJson(),
+  };
+}
+
+/// Outbound client decision matching `ApprovalDecisionMessage` in `crates/approval`.
+class ApprovalDecisionMessage {
+  /// Creates an [ApprovalDecisionMessage].
+  const ApprovalDecisionMessage({
+    required this.requestId,
+    required this.action,
+  });
+
+  /// Target single-use request identifier.
+  final String requestId;
+
+  /// Selected action from [ApprovalRequest.allowedActions].
+  final String action;
+
+  /// Serializes this decision to wire JSON.
+  Map<String, Object?> toJson() => {'request_id': requestId, 'action': action};
 }

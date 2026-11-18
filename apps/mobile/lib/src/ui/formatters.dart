@@ -45,3 +45,12 @@ String shortenFingerprint(String fingerprint) {
   }
   return '${fingerprint.substring(0, 8)}…${fingerprint.substring(fingerprint.length - 8)}';
 }
+
+/// Formats a UTC epoch millisecond timestamp into local `HH:MM:SS`.
+String formatEpochTime(int epochMs) {
+  final dt = DateTime.fromMillisecondsSinceEpoch(epochMs).toLocal();
+  final hh = dt.hour.toString().padLeft(2, '0');
+  final mm = dt.minute.toString().padLeft(2, '0');
+  final ss = dt.second.toString().padLeft(2, '0');
+  return '$hh:$mm:$ss';
+}

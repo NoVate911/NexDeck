@@ -11,6 +11,7 @@ repository.workspace = true
 eframe.workspace = true
 nexdeck-api.workspace = true
 nexdeck-core.workspace = true
+nexdeck-notifications.workspace = true
 nexdeck-transport.workspace = true
 serde_json.workspace = true
 
